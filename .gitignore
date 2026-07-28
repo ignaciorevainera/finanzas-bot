@@ -1,0 +1,69 @@
+
+# Entornos y dependencias
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# IDEs
+.idea/
+.vscode/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de configuración/secretos
+.env
+.env.*
+secrets.json
+credentials.json
+config.yml
+config.yaml
+
+# Tokens, claves y credenciales (archivos de texto que puedan contener la API_KEY/TOKEN)
+*.key
+*.pem
+*.token
+token
+telegram_token
+
+# Modelos y pesos (IA)
+models/
+model/
+checkpoints/
+*.ckpt
+*.safetensors
+*.pt
+*.bin
+*.h5
+
+# Cachés de librerías y datos descargados
+cache/
+data/
+datasets/
+.cache/
+.huggingface/
+hf_cache/
+
+# Logs y bases de datos locales
+logs/
+*.log
+*.sqlite3
+*.db
+
+# Paquetes node (si hay frontend)
+node_modules/
+dist/
+build/
+
+# Otros
+coverage/
+coverage.xml
+*.egg-info/
+pip-wheel-metadata/
+
+# Guardar este archivo en el repositorio pero evitar subir claves/credenciales y modelos grandes
