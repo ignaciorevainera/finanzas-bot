@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str = ""
     webhook_url: str = ""
     allowed_chat_id: int | None = None
+    gemini_model: str = "gemini-3.5-flash"
 
     model_config = SettingsConfigDict(
         env_file=".env",

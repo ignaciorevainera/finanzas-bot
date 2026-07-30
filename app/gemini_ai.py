@@ -26,7 +26,7 @@ If the input does not describe a valid transaction, return JSON with key "error"
 async def parse_transaction_from_text(text: str) -> dict | None:
     try:
         response = await client.aio.models.generate_content(
-            model="gemini-2.0-flash",
+            model=settings.gemini_model,
             contents=text,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
@@ -63,7 +63,7 @@ async def parse_transaction_from_audio(
     try:
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
         response = await client.aio.models.generate_content(
-            model="gemini-2.0-flash",
+            model=settings.gemini_model,
             contents=[audio_part, "Extract transaction details from audio."],
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
