@@ -57,6 +57,7 @@ async def lifespan(app: FastAPI):
     await application.start()
     
     webhook_url = f"{settings.webhook_url}/webhook"
+    logger.info("Setting webhook to URL: %s", webhook_url)
     await application.bot.set_webhook(url=webhook_url, allowed_updates=Update.ALL_TYPES)
 
     app.state.telegram_app = application
