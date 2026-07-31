@@ -4,6 +4,14 @@ from google import genai
 from google.genai import types
 from app.config import settings
 
+def clean_json_text(text: str) -> str:
+    text = text.strip()
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        return text[first_brace : last_brace + 1]
+    return text
+
 logger = logging.getLogger(__name__)
 
 client = genai.Client(api_key=settings.gemini_api_key)
@@ -33,7 +41,7 @@ async def parse_transaction_from_text(text: str) -> dict | None:
                 response_mime_type="application/json",
             ),
         )
-        data = json.loads(response.text)
+        data = json.loads(clean_json_text(response.text))
         if "error" in data or not isinstance(data, dict):
             logger.warning(
                 "Failed to parse transaction from text: invalid structure",
@@ -70,7 +78,7 @@ async def parse_transaction_from_audio(
                 response_mime_type="application/json",
             ),
         )
-        data = json.loads(response.text)
+        data = json.loads(clean_json_text(response.text))
         if "error" in data or not isinstance(data, dict):
             logger.warning(
                 "Failed to parse transaction from audio: invalid structure",
