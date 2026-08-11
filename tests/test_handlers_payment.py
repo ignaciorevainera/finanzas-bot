@@ -143,6 +143,12 @@ async def test_callback_confirm_saves_transaction(mock_insert):
             "tags": [], "location": None, "notes": None,
         },
     }
+
+    async def side_effect_check_popped(data):
+        assert 123 not in handlers.pending_transactions
+
+    mock_insert.side_effect = side_effect_check_popped
+
     update = make_update(callback_data="confirm", chat_id=123)
     context = MagicMock()
     await handlers.callback_handler(update, context)
@@ -158,6 +164,23 @@ async def test_callback_confirm_saves_transaction(mock_insert):
 
 
 @pytest.mark.asyncio
+async def test_callback_cancel_removes_pending_transaction():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "confirm",
+        "data": {"type": "expense", "amount": 5900},
+    }
+    update = make_update(callback_data="cancel", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    update.callback_query.edit_message_text.assert_called_once_with(
+        text="Transacción cancelada."
+    )
+    assert 123 not in handlers.pending_transactions
+
+
+@pytest.mark.asyncio
 async def test_confirm_message_includes_description():
     from app.handlers import _build_confirm_text
     data = {
@@ -167,4 +190,22 @@ async def test_confirm_message_includes_description():
     }
     text = _build_confirm_text(data)
     assert "jugo" in text
+
+
+@pytest.mark.asyncio
+@patch("app.handlers.get_recent_transactions")
+async def test_delete_handler_includes_description(mock_recent):
+    from app import handlers
+    mock_recent.return_value = [
+        {"id": "1", "type": "expense", "amount": 1200, "category": "transport", "description": "colectivo"},
+        {"id": "2", "type": "income", "amount": 5000, "category": "freelance", "description": None},
+    ]
+    update = make_update(chat_id=123)
+    context = MagicMock()
+    await handlers.delete_handler(update, context)
+    update.message.reply_text.assert_called_once()
+    sent_text = update.message.reply_text.call_args[0][0]
+    assert "1. Gasto de $1200 en Transporte — colectivo" in sent_text
+    assert "2. Ingreso de $5000 en Freelance\n" in sent_text
+
 

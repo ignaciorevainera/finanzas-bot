@@ -135,7 +135,8 @@ async def delete_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, t in enumerate(transactions, 1):
         type_label = "Gasto" if t["type"] == "expense" else "Ingreso"
         category_label = CATEGORY_LABELS.get(t["category"], t["category"])
-        msg += f"{i}. {type_label} de ${t['amount']} en {category_label}\n"
+        desc = f" — {t['description']}" if t.get("description") else ""
+        msg += f"{i}. {type_label} de ${t['amount']} en {category_label}{desc}\n"
         
     await update.message.reply_text(msg)
 
@@ -305,10 +306,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data == "confirm":
-        await insert_transaction(state["data"])
+        data = pending_transactions.pop(chat_id)["data"]
+        await insert_transaction(data)
         await query.edit_message_text(text="Transacción guardada exitosamente. ✅")
     elif query.data == "cancel":
+        pending_transactions.pop(chat_id, None)
         await query.edit_message_text(text="Transacción cancelada.")
-
-    if chat_id in pending_transactions:
-        del pending_transactions[chat_id]
