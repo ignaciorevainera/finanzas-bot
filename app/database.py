@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     amount DECIMAL(12, 2) NOT NULL,
     currency VARCHAR(3) NOT NULL DEFAULT 'ARS',
     category VARCHAR(100) NOT NULL,
+    description VARCHAR(255),
     merchant VARCHAR(255),
     payment_method VARCHAR(50) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'completed'
@@ -29,11 +30,16 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 """
 
+ALTER_ADD_DESCRIPTION_SQL = """
+ALTER TABLE transactions
+ADD COLUMN IF NOT EXISTS description VARCHAR(255);
+"""
+
 INSERT_SQL = """
 INSERT INTO transactions
-    (type, amount, currency, category, merchant, payment_method,
+    (type, amount, currency, category, description, merchant, payment_method,
      status, tags, location, notes, original_message)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
 """
 
@@ -76,6 +82,7 @@ async def init_db() -> None:
         pool = await asyncpg.create_pool(dsn=settings.database_url, min_size=1, max_size=5)
         async with pool.acquire() as conn:
             await conn.execute(CREATE_TABLE_SQL)
+            await conn.execute(ALTER_ADD_DESCRIPTION_SQL)
         logger.info("Database pool created and schema verified")
     except Exception as e:
         logger.error("Failed to initialize database pool: %s", e)
@@ -105,6 +112,7 @@ async def insert_transaction(data: dict) -> asyncpg.Record:
             data["amount"],
             data.get("currency", "ARS"),
             data["category"],
+            data.get("description"),
             data.get("merchant"),
             data["payment_method"],
             data.get("status", "completed"),
@@ -113,6 +121,7 @@ async def insert_transaction(data: dict) -> asyncpg.Record:
             data.get("notes"),
             data.get("original_message"),
         )
+
     except Exception as e:
         logger.error("Error inserting transaction: %s", e)
         raise

@@ -22,6 +22,7 @@ Return ONLY a JSON object with the following fields:
 - amount: number (positive float or int)
 - currency: string (ISO currency code, e.g. "ARS", "USD"; default "ARS")
 - category: one of ["food", "transport", "entertainment", "health", "education", "clothing", "housing", "utilities", "subscriptions", "salary", "freelance", "gift", "savings", "investment", "travel", "other"]
+- description: short string describing what was bought or received (e.g. "jugo", "almuerzo", "sueldo de agosto"); null if not mentioned
 - merchant: string or null
 - payment_method: one of ["cash", "debit card", "credit card", "transfer", "other"] if explicitly mentioned or clearly inferable; null if not mentioned or ambiguous
 - tags: array of strings

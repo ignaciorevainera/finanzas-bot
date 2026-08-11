@@ -155,3 +155,16 @@ async def test_callback_confirm_saves_transaction(mock_insert):
         text="Transacción guardada exitosamente. ✅"
     )
     assert 123 not in handlers.pending_transactions
+
+
+@pytest.mark.asyncio
+async def test_confirm_message_includes_description():
+    from app.handlers import _build_confirm_text
+    data = {
+        "type": "expense", "amount": 5900, "currency": "ARS",
+        "category": "food", "description": "jugo", "merchant": None,
+        "payment_method": "cash", "tags": [], "location": None, "notes": None,
+    }
+    text = _build_confirm_text(data)
+    assert "jugo" in text
+

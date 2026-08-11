@@ -113,7 +113,8 @@ async def recent_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         created = t['created_at'].strftime('%Y-%m-%d %H:%M') if t['created_at'] else 'N/A'
         type_label = "Gasto" if t["type"] == "expense" else "Ingreso"
         category_label = CATEGORY_LABELS.get(t["category"], t["category"])
-        msg += f"{i}. {type_label} de ${t['amount']} en {category_label} ({created})\n"
+        desc = f" — {t['description']}" if t.get("description") else ""
+        msg += f"{i}. {type_label} de ${t['amount']} en {category_label}{desc} ({created})\n"
     
     await update.message.reply_text(msg)
 
@@ -249,6 +250,8 @@ def _build_confirm_text(data: dict) -> str:
         f"Categoría: {category_label}\n"
         f"Método de pago: {payment_label}\n"
     )
+    if data.get("description"):
+        msg += f"Concepto: {data.get('description')}\n"
     if data.get("merchant"):
         msg += f"Comercio: {data.get('merchant')}\n"
     return msg
