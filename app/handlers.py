@@ -15,6 +15,33 @@ from app.database import (
 )
 from app.gemini_ai import parse_transaction_from_text, parse_transaction_from_audio
 
+CATEGORY_LABELS: dict[str, str] = {
+    "food": "Comida",
+    "transport": "Transporte",
+    "entertainment": "Entretenimiento",
+    "health": "Salud",
+    "education": "Educación",
+    "clothing": "Ropa",
+    "housing": "Vivienda",
+    "utilities": "Servicios",
+    "subscriptions": "Suscripciones",
+    "salary": "Sueldo",
+    "freelance": "Freelance",
+    "gift": "Regalo",
+    "savings": "Ahorros",
+    "investment": "Inversión",
+    "travel": "Viajes",
+    "other": "Otro",
+}
+
+PAYMENT_METHOD_LABELS: dict[str, str] = {
+    "cash": "💵 Efectivo",
+    "debit card": "💳 Débito",
+    "credit card": "💳 Crédito",
+    "transfer": "🏦 Transferencia",
+    "other": "Otro",
+}
+
 logger = logging.getLogger(__name__)
 
 pending_transactions = {}
@@ -66,7 +93,9 @@ async def summary_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = f"Resumen del mes:\nIngresos: ${totals['total_income']:.2f}\nGastos: ${totals['total_expenses']:.2f}\n\nDesglose:\n"
     for row in summary:
-        msg += f"- {row['category']} ({row['type']}): ${row['total']:.2f}\n"
+        type_label = "Gasto" if row["type"] == "expense" else "Ingreso"
+        category_label = CATEGORY_LABELS.get(row["category"], row["category"])
+        msg += f"- {category_label} ({type_label}): ${row['total']:.2f}\n"
     
     await update.message.reply_text(msg)
 
@@ -82,7 +111,9 @@ async def recent_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "Últimas 5 transacciones:\n"
     for i, t in enumerate(transactions, 1):
         created = t['created_at'].strftime('%Y-%m-%d %H:%M') if t['created_at'] else 'N/A'
-        msg += f"{i}. {t['type']} de ${t['amount']} en {t['category']} ({created})\n"
+        type_label = "Gasto" if t["type"] == "expense" else "Ingreso"
+        category_label = CATEGORY_LABELS.get(t["category"], t["category"])
+        msg += f"{i}. {type_label} de ${t['amount']} en {category_label} ({created})\n"
     
     await update.message.reply_text(msg)
 
@@ -101,7 +132,9 @@ async def delete_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     msg = "Responde con el número (1-5) de la transacción que deseas eliminar:\n"
     for i, t in enumerate(transactions, 1):
-        msg += f"{i}. {t['type']} de ${t['amount']} en {t['category']}\n"
+        type_label = "Gasto" if t["type"] == "expense" else "Ingreso"
+        category_label = CATEGORY_LABELS.get(t["category"], t["category"])
+        msg += f"{i}. {type_label} de ${t['amount']} en {category_label}\n"
         
     await update.message.reply_text(msg)
 
@@ -177,51 +210,102 @@ async def handle_parsed_data(update: Update, context: ContextTypes.DEFAULT_TYPE,
     if not data or "error" in data:
         await update.message.reply_text("No pude entender la transacción. Por favor, intenta de nuevo.")
         return
-        
+
     chat_id = update.effective_chat.id
+
+    if data.get("payment_method") is None:
+        pending_transactions[chat_id] = {"action": "pick_payment", "data": data}
+        keyboard = [
+            [
+                InlineKeyboardButton(PAYMENT_METHOD_LABELS["cash"], callback_data="pm_cash"),
+                InlineKeyboardButton(PAYMENT_METHOD_LABELS["debit card"], callback_data="pm_debit card"),
+            ],
+            [
+                InlineKeyboardButton(PAYMENT_METHOD_LABELS["credit card"], callback_data="pm_credit card"),
+                InlineKeyboardButton(PAYMENT_METHOD_LABELS["transfer"], callback_data="pm_transfer"),
+            ],
+            [
+                InlineKeyboardButton(PAYMENT_METHOD_LABELS["other"], callback_data="pm_other"),
+            ],
+        ]
+        await update.message.reply_text(
+            "¿Con qué método de pago fue la transacción?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
     pending_transactions[chat_id] = {"action": "confirm", "data": data}
-    
+    await _send_confirm_message(update, data)
+
+
+def _build_confirm_text(data: dict) -> str:
+    category_label = CATEGORY_LABELS.get(data.get("category", ""), data.get("category", ""))
+    payment_label = PAYMENT_METHOD_LABELS.get(data.get("payment_method", ""), data.get("payment_method", ""))
+    type_label = "Gasto" if data.get("type") == "expense" else "Ingreso"
     msg = (
         f"Transacción detectada:\n"
-        f"Tipo: {data.get('type')}\n"
+        f"Tipo: {type_label}\n"
         f"Monto: ${data.get('amount')} {data.get('currency', 'ARS')}\n"
-        f"Categoría: {data.get('category')}\n"
-        f"Método de pago: {data.get('payment_method')}\n"
+        f"Categoría: {category_label}\n"
+        f"Método de pago: {payment_label}\n"
     )
     if data.get("merchant"):
         msg += f"Comercio: {data.get('merchant')}\n"
-        
+    return msg
+
+
+async def _send_confirm_message(update: Update, data: dict):
     keyboard = [
         [
             InlineKeyboardButton("✅ Confirmar", callback_data="confirm"),
             InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
         ]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(msg, reply_markup=reply_markup)
+    await update.message.reply_text(
+        _build_confirm_text(data),
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
 
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     if not check_access(update):
         return
-        
+
     chat_id = update.effective_chat.id
     state = pending_transactions.get(chat_id)
-    
-    if not state or state.get("action") != "confirm":
+
+    if not state:
+        await query.edit_message_text(text="No hay transacción pendiente.")
+        return
+
+    if state.get("action") == "pick_payment" and query.data.startswith("pm_"):
+        payment_method = query.data[len("pm_"):]
+        state["data"]["payment_method"] = payment_method
+        pending_transactions[chat_id] = {"action": "confirm", "data": state["data"]}
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Confirmar", callback_data="confirm"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+            ]
+        ]
+        await query.edit_message_text(
+            text=_build_confirm_text(state["data"]),
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
+    if state.get("action") != "confirm":
         await query.edit_message_text(text="No hay transacción pendiente para confirmar.")
         return
-        
+
     if query.data == "confirm":
-        data = state["data"]
-        await insert_transaction(data)
-        await query.edit_message_text(text="Transacción guardada exitosamente.")
+        await insert_transaction(state["data"])
+        await query.edit_message_text(text="Transacción guardada exitosamente. ✅")
     elif query.data == "cancel":
         await query.edit_message_text(text="Transacción cancelada.")
-        
+
     if chat_id in pending_transactions:
         del pending_transactions[chat_id]
