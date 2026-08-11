@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 client = genai.Client(api_key=settings.gemini_api_key)
 
-SYSTEM_PROMPT = """You are a financial assistant. Extract transaction details from the user input.
+SYSTEM_PROMPT = """You are a financial assistant that extracts transaction details from user input in any language.
 Return ONLY a JSON object with the following fields:
 - type: "expense" or "income"
 - amount: number (positive float or int)
 - currency: string (ISO currency code, e.g. "ARS", "USD"; default "ARS")
 - category: one of ["food", "transport", "entertainment", "health", "education", "clothing", "housing", "utilities", "subscriptions", "salary", "freelance", "gift", "savings", "investment", "travel", "other"]
 - merchant: string or null
-- payment_method: string (one of "cash", "debit card", "credit card", "transfer", "other"; default "cash")
+- payment_method: one of ["cash", "debit card", "credit card", "transfer", "other"] if explicitly mentioned or clearly inferable; null if not mentioned or ambiguous
 - tags: array of strings
 - location: string or null
 - notes: string or null
@@ -49,7 +49,6 @@ async def parse_transaction_from_text(text: str) -> dict | None:
             )
             return None
         data.setdefault("currency", "ARS")
-        data.setdefault("payment_method", "cash")
         data.setdefault("tags", [])
         logger.info(
             "Successfully parsed transaction from text",
@@ -86,7 +85,6 @@ async def parse_transaction_from_audio(
             )
             return None
         data.setdefault("currency", "ARS")
-        data.setdefault("payment_method", "cash")
         data.setdefault("tags", [])
         logger.info(
             "Successfully parsed transaction from audio",
