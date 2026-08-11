@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import csv
 import io
 import logging
@@ -45,6 +46,30 @@ PAYMENT_METHOD_LABELS: dict[str, str] = {
 logger = logging.getLogger(__name__)
 
 pending_transactions = {}
+
+
+def _get_date_keyboard() -> InlineKeyboardMarkup:
+    keyboard = [
+        [
+            InlineKeyboardButton("📅 Hoy", callback_data="date_today"),
+            InlineKeyboardButton("🔙 Ayer", callback_data="date_yesterday"),
+        ],
+        [
+            InlineKeyboardButton("🗓 Otra fecha", callback_data="date_custom"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ Confirmar", callback_data="confirm"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+            ]
+        ]
+    )
 
 
 def check_access(update: Update) -> bool:
@@ -190,6 +215,19 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del pending_transactions[chat_id]
         return
     
+    if state and state.get("action") == "wait_custom_date":
+        await update.message.chat.send_action(action="typing")
+        parsed_data = await parse_transaction_from_text(text)
+        if parsed_data and parsed_data.get("transaction_date"):
+            state["data"]["transaction_date"] = parsed_data["transaction_date"]
+            pending_transactions[chat_id] = {"action": "confirm", "data": state["data"]}
+            await _send_confirm_message(update, state["data"])
+        else:
+            await update.message.reply_text(
+                "No pude entender la fecha. Por favor, escribe la fecha (ej: 'ayer', 'el martes', '10/08') o intenta de nuevo."
+            )
+        return
+    
     await update.message.chat.send_action(action="typing")
     data = await parse_transaction_from_text(text)
     await handle_parsed_data(update, context, data)
@@ -237,6 +275,14 @@ async def handle_parsed_data(update: Update, context: ContextTypes.DEFAULT_TYPE,
         )
         return
 
+    if data.get("transaction_date") is None:
+        pending_transactions[chat_id] = {"action": "pick_date", "data": data}
+        await update.message.reply_text(
+            "¿De qué fecha es la transacción?",
+            reply_markup=_get_date_keyboard(),
+        )
+        return
+
     pending_transactions[chat_id] = {"action": "confirm", "data": data}
     await _send_confirm_message(update, data)
 
@@ -245,6 +291,19 @@ def _build_confirm_text(data: dict) -> str:
     category_label = CATEGORY_LABELS.get(data.get("category", ""), data.get("category", ""))
     payment_label = PAYMENT_METHOD_LABELS.get(data.get("payment_method", ""), data.get("payment_method", ""))
     type_label = "Gasto" if data.get("type") == "expense" else "Ingreso"
+    
+    tx_date_str = ""
+    if data.get("transaction_date"):
+        dt_val = data["transaction_date"]
+        if isinstance(dt_val, datetime):
+            tx_date_str = dt_val.strftime("%Y-%m-%d %H:%M")
+        elif isinstance(dt_val, str):
+            try:
+                parsed_dt = datetime.fromisoformat(dt_val)
+                tx_date_str = parsed_dt.strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                tx_date_str = dt_val
+
     msg = (
         f"Transacción detectada:\n"
         f"Tipo: {type_label}\n"
@@ -252,6 +311,8 @@ def _build_confirm_text(data: dict) -> str:
         f"Categoría: {category_label}\n"
         f"Método de pago: {payment_label}\n"
     )
+    if tx_date_str:
+        msg += f"Fecha: {tx_date_str}\n"
     if data.get("description"):
         msg += f"Concepto: {data.get('description')}\n"
     if data.get("merchant"):
@@ -260,15 +321,9 @@ def _build_confirm_text(data: dict) -> str:
 
 
 async def _send_confirm_message(update: Update, data: dict):
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Confirmar", callback_data="confirm"),
-            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
-        ]
-    ]
     await update.message.reply_text(
         _build_confirm_text(data),
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=_get_confirm_keyboard(),
     )
 
 
@@ -289,17 +344,41 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state.get("action") == "pick_payment" and query.data.startswith("pm_"):
         payment_method = query.data[len("pm_"):]
         state["data"]["payment_method"] = payment_method
-        pending_transactions[chat_id] = {"action": "confirm", "data": state["data"]}
-        keyboard = [
-            [
-                InlineKeyboardButton("✅ Confirmar", callback_data="confirm"),
-                InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
-            ]
-        ]
-        await query.edit_message_text(
-            text=_build_confirm_text(state["data"]),
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+        if state["data"].get("transaction_date") is None:
+            pending_transactions[chat_id] = {"action": "pick_date", "data": state["data"]}
+            await query.edit_message_text(
+                text="¿De qué fecha es la transacción?",
+                reply_markup=_get_date_keyboard(),
+            )
+        else:
+            pending_transactions[chat_id] = {"action": "confirm", "data": state["data"]}
+            await query.edit_message_text(
+                text=_build_confirm_text(state["data"]),
+                reply_markup=_get_confirm_keyboard(),
+            )
+        return
+
+    if state.get("action") == "pick_date" and query.data.startswith("date_"):
+        if query.data == "date_today":
+            state["data"]["transaction_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            pending_transactions[chat_id] = {"action": "confirm", "data": state["data"]}
+            await query.edit_message_text(
+                text=_build_confirm_text(state["data"]),
+                reply_markup=_get_confirm_keyboard(),
+            )
+        elif query.data == "date_yesterday":
+            yesterday = datetime.now() - timedelta(days=1)
+            state["data"]["transaction_date"] = yesterday.strftime("%Y-%m-%d %H:%M:%S")
+            pending_transactions[chat_id] = {"action": "confirm", "data": state["data"]}
+            await query.edit_message_text(
+                text=_build_confirm_text(state["data"]),
+                reply_markup=_get_confirm_keyboard(),
+            )
+        elif query.data == "date_custom":
+            pending_transactions[chat_id] = {"action": "wait_custom_date", "data": state["data"]}
+            await query.edit_message_text(
+                text="Por favor, escribe la fecha de la transacción (ej. 'ayer', 'el martes pasado', '10/08'):"
+            )
         return
 
     if state.get("action") != "confirm":
@@ -313,3 +392,4 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "cancel":
         pending_transactions.pop(chat_id, None)
         await query.edit_message_text(text="Transacción cancelada.")
+

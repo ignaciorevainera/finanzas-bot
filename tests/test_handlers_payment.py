@@ -26,7 +26,7 @@ async def test_handle_parsed_data_asks_payment_method_when_null():
     data = {
         "type": "expense", "amount": 5900, "currency": "ARS",
         "category": "food", "merchant": None, "payment_method": None,
-        "tags": [], "location": None, "notes": None,
+        "transaction_date": None, "tags": [], "location": None, "notes": None,
     }
     await handlers.handle_parsed_data(update, context, data)
     update.message.reply_text.assert_called_once()
@@ -35,7 +35,7 @@ async def test_handle_parsed_data_asks_payment_method_when_null():
 
 
 @pytest.mark.asyncio
-async def test_handle_parsed_data_shows_confirm_when_payment_known():
+async def test_handle_parsed_data_asks_date_when_payment_known_and_date_null():
     from app import handlers
     handlers.pending_transactions.clear()
     update = make_update(text="gaste 5900 con debito")
@@ -43,6 +43,25 @@ async def test_handle_parsed_data_shows_confirm_when_payment_known():
     data = {
         "type": "expense", "amount": 5900, "currency": "ARS",
         "category": "food", "merchant": None, "payment_method": "debit card",
+        "transaction_date": None, "tags": [], "location": None, "notes": None,
+    }
+    await handlers.handle_parsed_data(update, context, data)
+    update.message.reply_text.assert_called_once()
+    assert "¿De qué fecha es la transacción?" in update.message.reply_text.call_args[0][0]
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_date"
+
+
+@pytest.mark.asyncio
+async def test_handle_parsed_data_shows_confirm_when_payment_and_date_known():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    update = make_update(text="gaste 5900 con debito ayer")
+    context = MagicMock()
+    data = {
+        "type": "expense", "amount": 5900, "currency": "ARS",
+        "category": "food", "merchant": None, "payment_method": "debit card",
+        "transaction_date": "2026-08-10 12:00:00",
         "tags": [], "location": None, "notes": None,
     }
     await handlers.handle_parsed_data(update, context, data)
@@ -51,7 +70,7 @@ async def test_handle_parsed_data_shows_confirm_when_payment_known():
 
 
 @pytest.mark.asyncio
-async def test_callback_sets_payment_method_and_advances_to_confirm():
+async def test_callback_sets_payment_method_and_advances_to_pick_date_when_date_null():
     from app import handlers
     handlers.pending_transactions.clear()
     handlers.pending_transactions[123] = {
@@ -59,7 +78,29 @@ async def test_callback_sets_payment_method_and_advances_to_confirm():
         "data": {
             "type": "expense", "amount": 5900, "currency": "ARS",
             "category": "food", "merchant": None, "payment_method": None,
-            "tags": [], "location": None, "notes": None,
+            "transaction_date": None, "tags": [], "location": None, "notes": None,
+        },
+    }
+    update = make_update(callback_data="pm_cash", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions.get(123)
+    assert state is not None
+    assert state["action"] == "pick_date"
+    assert state["data"]["payment_method"] == "cash"
+    assert update.callback_query.edit_message_text.call_args[1]["text"] == "¿De qué fecha es la transacción?"
+
+
+@pytest.mark.asyncio
+async def test_callback_sets_payment_method_and_advances_to_confirm_when_date_present():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_payment",
+        "data": {
+            "type": "expense", "amount": 5900, "currency": "ARS",
+            "category": "food", "merchant": None, "payment_method": None,
+            "transaction_date": "2026-08-10 12:00:00", "tags": [], "location": None, "notes": None,
         },
     }
     update = make_update(callback_data="pm_cash", chat_id=123)
@@ -69,6 +110,117 @@ async def test_callback_sets_payment_method_and_advances_to_confirm():
     assert state is not None
     assert state["action"] == "confirm"
     assert state["data"]["payment_method"] == "cash"
+
+
+@pytest.mark.asyncio
+async def test_callback_date_today_sets_date_and_advances_to_confirm():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_date",
+        "data": {
+            "type": "expense", "amount": 5900, "currency": "ARS",
+            "category": "food", "merchant": None, "payment_method": "cash",
+            "transaction_date": None,
+        },
+    }
+    update = make_update(callback_data="date_today", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions.get(123)
+    assert state is not None
+    assert state["action"] == "confirm"
+    assert state["data"]["transaction_date"] is not None
+
+
+@pytest.mark.asyncio
+async def test_callback_date_yesterday_sets_date_and_advances_to_confirm():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_date",
+        "data": {
+            "type": "expense", "amount": 5900, "currency": "ARS",
+            "category": "food", "merchant": None, "payment_method": "cash",
+            "transaction_date": None,
+        },
+    }
+    update = make_update(callback_data="date_yesterday", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions.get(123)
+    assert state is not None
+    assert state["action"] == "confirm"
+    assert state["data"]["transaction_date"] is not None
+
+
+@pytest.mark.asyncio
+async def test_callback_date_custom_prompts_user_text_input():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_date",
+        "data": {
+            "type": "expense", "amount": 5900, "currency": "ARS",
+            "category": "food", "merchant": None, "payment_method": "cash",
+            "transaction_date": None,
+        },
+    }
+    update = make_update(callback_data="date_custom", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions.get(123)
+    assert state is not None
+    assert state["action"] == "wait_custom_date"
+    assert "escribe la fecha" in update.callback_query.edit_message_text.call_args[1]["text"]
+
+
+@pytest.mark.asyncio
+@patch("app.handlers.parse_transaction_from_text")
+async def test_message_handler_wait_custom_date_success(mock_parse):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "wait_custom_date",
+        "data": {
+            "type": "expense", "amount": 5900, "currency": "ARS",
+            "category": "food", "merchant": None, "payment_method": "cash",
+            "transaction_date": None,
+        },
+    }
+    mock_parse.return_value = {"transaction_date": "2026-08-08 14:00:00"}
+    update = make_update(text="el sabado pasado", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions.get(123)
+    assert state is not None
+    assert state["action"] == "confirm"
+    assert state["data"]["transaction_date"] == "2026-08-08 14:00:00"
+    update.message.reply_text.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("app.handlers.parse_transaction_from_text")
+async def test_message_handler_wait_custom_date_failure(mock_parse):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "wait_custom_date",
+        "data": {
+            "type": "expense", "amount": 5900, "currency": "ARS",
+            "category": "food", "merchant": None, "payment_method": "cash",
+            "transaction_date": None,
+        },
+    }
+    mock_parse.return_value = None
+    update = make_update(text="invalid date input", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions.get(123)
+    assert state is not None
+    assert state["action"] == "wait_custom_date"
+    update.message.reply_text.assert_called_once()
+    assert "No pude entender la fecha" in update.message.reply_text.call_args[0][0]
 
 
 def test_spanish_labels_defined():
@@ -87,6 +239,7 @@ def test_build_confirm_text():
         "currency": "ARS",
         "category": "food",
         "payment_method": "credit card",
+        "transaction_date": "2026-08-10 20:00:00",
         "merchant": "Coto",
     }
     text = _build_confirm_text(data)
@@ -94,6 +247,7 @@ def test_build_confirm_text():
     assert "Monto: $1500 ARS" in text
     assert "Categoría: Comida" in text
     assert "Método de pago: 💳 Crédito" in text
+    assert "Fecha: 2026-08-10 20:00" in text
     assert "Comercio: Coto" in text
 
 
@@ -178,6 +332,7 @@ async def test_callback_confirm_saves_transaction(mock_insert):
         "data": {
             "type": "expense", "amount": 5900, "currency": "ARS",
             "category": "food", "merchant": None, "payment_method": "cash",
+            "transaction_date": "2026-08-10 12:00:00",
             "tags": [], "location": None, "notes": None,
         },
     }
@@ -193,6 +348,7 @@ async def test_callback_confirm_saves_transaction(mock_insert):
     mock_insert.assert_called_once_with({
         "type": "expense", "amount": 5900, "currency": "ARS",
         "category": "food", "merchant": None, "payment_method": "cash",
+        "transaction_date": "2026-08-10 12:00:00",
         "tags": [], "location": None, "notes": None,
     })
     update.callback_query.edit_message_text.assert_called_once_with(
@@ -224,7 +380,8 @@ async def test_confirm_message_includes_description():
     data = {
         "type": "expense", "amount": 5900, "currency": "ARS",
         "category": "food", "description": "jugo", "merchant": None,
-        "payment_method": "cash", "tags": [], "location": None, "notes": None,
+        "payment_method": "cash", "transaction_date": "2026-08-10 12:00:00",
+        "tags": [], "location": None, "notes": None,
     }
     text = _build_confirm_text(data)
     assert "jugo" in text
@@ -245,6 +402,7 @@ async def test_delete_handler_includes_description(mock_recent):
     sent_text = update.message.reply_text.call_args[0][0]
     assert "1. Gasto de $1200 en Transporte — colectivo" in sent_text
     assert "2. Ingreso de $5000 en Freelance\n" in sent_text
+
 
 
 
