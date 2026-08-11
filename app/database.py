@@ -1,3 +1,4 @@
+from datetime import datetime
 import logging
 import uuid
 
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     tags TEXT[],
     location VARCHAR(255),
     notes TEXT,
+    transaction_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     original_message TEXT
@@ -35,11 +37,27 @@ ALTER TABLE transactions
 ADD COLUMN IF NOT EXISTS description VARCHAR(255);
 """
 
+ALTER_ADD_TRANSACTION_DATE_SQL = """
+ALTER TABLE transactions
+ADD COLUMN IF NOT EXISTS transaction_date TIMESTAMP WITH TIME ZONE;
+"""
+
+UPDATE_NULL_TRANSACTION_DATE_SQL = """
+UPDATE transactions
+SET transaction_date = created_at
+WHERE transaction_date IS NULL;
+"""
+
+ALTER_SET_DEFAULT_TRANSACTION_DATE_SQL = """
+ALTER TABLE transactions
+ALTER COLUMN transaction_date SET DEFAULT CURRENT_TIMESTAMP;
+"""
+
 INSERT_SQL = """
 INSERT INTO transactions
     (type, amount, currency, category, description, merchant, payment_method,
-     status, tags, location, notes, original_message)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     status, tags, location, notes, original_message, transaction_date)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13::TIMESTAMP WITH TIME ZONE, CURRENT_TIMESTAMP))
 RETURNING *;
 """
 
@@ -50,7 +68,7 @@ DELETE FROM transactions WHERE id = $1 RETURNING *;
 MONTHLY_SUMMARY_SQL = """
 SELECT type, category, SUM(amount) AS total
 FROM transactions
-WHERE date_trunc('month', created_at) = date_trunc('month', CURRENT_TIMESTAMP)
+WHERE date_trunc('month', transaction_date) = date_trunc('month', CURRENT_TIMESTAMP)
   AND status = 'completed'
 GROUP BY type, category
 ORDER BY type, total DESC;
@@ -61,18 +79,18 @@ SELECT
     COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) AS total_income,
     COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) AS total_expenses
 FROM transactions
-WHERE date_trunc('month', created_at) = date_trunc('month', CURRENT_TIMESTAMP)
+WHERE date_trunc('month', transaction_date) = date_trunc('month', CURRENT_TIMESTAMP)
   AND status = 'completed';
 """
 
 RECENT_SQL = """
 SELECT * FROM transactions
-ORDER BY created_at DESC
+ORDER BY transaction_date DESC, created_at DESC
 LIMIT $1;
 """
 
 ALL_SQL = """
-SELECT * FROM transactions ORDER BY created_at DESC;
+SELECT * FROM transactions ORDER BY transaction_date DESC, created_at DESC;
 """
 
 
@@ -83,6 +101,9 @@ async def init_db() -> None:
         async with pool.acquire() as conn:
             await conn.execute(CREATE_TABLE_SQL)
             await conn.execute(ALTER_ADD_DESCRIPTION_SQL)
+            await conn.execute(ALTER_ADD_TRANSACTION_DATE_SQL)
+            await conn.execute(UPDATE_NULL_TRANSACTION_DATE_SQL)
+            await conn.execute(ALTER_SET_DEFAULT_TRANSACTION_DATE_SQL)
         logger.info("Database pool created and schema verified")
     except Exception as e:
         logger.error("Failed to initialize database pool: %s", e)
@@ -106,6 +127,10 @@ async def insert_transaction(data: dict) -> asyncpg.Record:
     if pool is None:
         raise RuntimeError("Database connection pool is not initialized")
     try:
+        tx_date = data.get("transaction_date")
+        if isinstance(tx_date, str):
+            tx_date = datetime.fromisoformat(tx_date)
+
         return await pool.fetchrow(
             INSERT_SQL,
             data["type"],
@@ -120,6 +145,7 @@ async def insert_transaction(data: dict) -> asyncpg.Record:
             data.get("location"),
             data.get("notes"),
             data.get("original_message"),
+            tx_date,
         )
 
     except Exception as e:
@@ -181,3 +207,4 @@ async def get_all_transactions() -> list[asyncpg.Record]:
     except Exception as e:
         logger.error("Error fetching all transactions: %s", e)
         raise
+

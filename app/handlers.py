@@ -110,10 +110,11 @@ async def recent_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     msg = "Últimas 5 transacciones:\n"
     for i, t in enumerate(transactions, 1):
-        created = t['created_at'].strftime('%Y-%m-%d %H:%M') if t['created_at'] else 'N/A'
+        dt = t['transaction_date'] if ('transaction_date' in t and t['transaction_date']) else t['created_at']
+        created = dt.strftime('%Y-%m-%d %H:%M') if dt else 'N/A'
         type_label = "Gasto" if t["type"] == "expense" else "Ingreso"
         category_label = CATEGORY_LABELS.get(t["category"], t["category"])
-        desc = f" — {t['description']}" if t.get("description") else ""
+        desc = f" — {t['description']}" if t['description'] else ""
         msg += f"{i}. {type_label} de ${t['amount']} en {category_label}{desc} ({created})\n"
     
     await update.message.reply_text(msg)
@@ -135,7 +136,7 @@ async def delete_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, t in enumerate(transactions, 1):
         type_label = "Gasto" if t["type"] == "expense" else "Ingreso"
         category_label = CATEGORY_LABELS.get(t["category"], t["category"])
-        desc = f" — {t['description']}" if t.get("description") else ""
+        desc = f" — {t['description']}" if t['description'] else ""
         msg += f"{i}. {type_label} de ${t['amount']} en {category_label}{desc}\n"
         
     await update.message.reply_text(msg)

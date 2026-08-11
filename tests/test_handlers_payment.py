@@ -114,13 +114,28 @@ async def test_summary_handler_uses_spanish_labels(mock_summary, mock_totals):
     assert "Comida (Gasto): $5000.00" in sent_text
 
 
+class MockRecord:
+    """Mock simulating asyncpg.Record which does not have a .get() method."""
+    def __init__(self, data: dict):
+        self._data = data
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __contains__(self, key):
+        return key in self._data
+
+    def get(self, key, default=None):
+        raise AttributeError("'Record' object has no attribute 'get'")
+
+
 @pytest.mark.asyncio
 @patch("app.handlers.get_recent_transactions")
 async def test_recent_handler_uses_spanish_labels(mock_recent):
     from app import handlers
     from datetime import datetime
     mock_recent.return_value = [
-        {"type": "expense", "amount": 1200, "category": "transport", "created_at": datetime(2026, 8, 10, 15, 30)}
+        MockRecord({"type": "expense", "amount": 1200, "category": "transport", "description": None, "transaction_date": None, "created_at": datetime(2026, 8, 10, 15, 30)})
     ]
     update = make_update(chat_id=123)
     context = MagicMock()
@@ -128,6 +143,29 @@ async def test_recent_handler_uses_spanish_labels(mock_recent):
     update.message.reply_text.assert_called_once()
     sent_text = update.message.reply_text.call_args[0][0]
     assert "1. Gasto de $1200 en Transporte (2026-08-10 15:30)" in sent_text
+
+
+@pytest.mark.asyncio
+@patch("app.handlers.get_recent_transactions")
+async def test_recent_handler_with_asyncpg_record_interface(mock_recent):
+    from app import handlers
+    from datetime import datetime
+    mock_recent.return_value = [
+        MockRecord({
+            "type": "expense",
+            "amount": 1200,
+            "category": "transport",
+            "description": "subte",
+            "transaction_date": datetime(2026, 8, 10, 15, 30),
+            "created_at": datetime(2026, 8, 10, 16, 0),
+        })
+    ]
+    update = make_update(chat_id=123)
+    context = MagicMock()
+    await handlers.recent_handler(update, context)
+    update.message.reply_text.assert_called_once()
+    sent_text = update.message.reply_text.call_args[0][0]
+    assert "1. Gasto de $1200 en Transporte — subte (2026-08-10 15:30)" in sent_text
 
 
 @pytest.mark.asyncio
@@ -197,8 +235,8 @@ async def test_confirm_message_includes_description():
 async def test_delete_handler_includes_description(mock_recent):
     from app import handlers
     mock_recent.return_value = [
-        {"id": "1", "type": "expense", "amount": 1200, "category": "transport", "description": "colectivo"},
-        {"id": "2", "type": "income", "amount": 5000, "category": "freelance", "description": None},
+        MockRecord({"id": "1", "type": "expense", "amount": 1200, "category": "transport", "description": "colectivo"}),
+        MockRecord({"id": "2", "type": "income", "amount": 5000, "category": "freelance", "description": None}),
     ]
     update = make_update(chat_id=123)
     context = MagicMock()
@@ -207,5 +245,6 @@ async def test_delete_handler_includes_description(mock_recent):
     sent_text = update.message.reply_text.call_args[0][0]
     assert "1. Gasto de $1200 en Transporte — colectivo" in sent_text
     assert "2. Ingreso de $5000 en Freelance\n" in sent_text
+
 
 
