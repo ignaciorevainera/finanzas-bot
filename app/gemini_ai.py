@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime
 from google import genai
 from google.genai import types
 from app.config import settings
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 client = genai.Client(api_key=settings.gemini_api_key)
 
 SYSTEM_PROMPT = """You are a financial assistant that extracts transaction details from user input in any language.
+The current date and time is {current_datetime}.
 Return ONLY a JSON object with the following fields:
 - type: "expense" or "income"
 - amount: number (positive float or int)
@@ -28,17 +30,30 @@ Return ONLY a JSON object with the following fields:
 - tags: array of strings
 - location: string or null
 - notes: string or null
+- transaction_date: ISO 8601 string ("YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS") if explicit or relative date/time is mentioned in user input (e.g. "ayer", "el lunes", "10/08"), resolved relative to current date and time; null if no date/time is mentioned
 
 If the input does not describe a valid transaction, return JSON with key "error": "invalid transaction"."""
 
 
-async def parse_transaction_from_text(text: str) -> dict | None:
+def _get_formatted_datetime(current_datetime: datetime | str | None) -> str:
+    if current_datetime is None:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(current_datetime, datetime):
+        return current_datetime.strftime("%Y-%m-%d %H:%M:%S")
+    return str(current_datetime)
+
+
+async def parse_transaction_from_text(
+    text: str, current_datetime: datetime | str | None = None
+) -> dict | None:
     try:
+        dt_str = _get_formatted_datetime(current_datetime)
+        system_instruction = SYSTEM_PROMPT.format(current_datetime=dt_str)
         response = await client.aio.models.generate_content(
             model=settings.gemini_model,
             contents=text,
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=system_instruction,
                 response_mime_type="application/json",
             ),
         )
@@ -51,6 +66,7 @@ async def parse_transaction_from_text(text: str) -> dict | None:
             return None
         data.setdefault("currency", "ARS")
         data.setdefault("tags", [])
+        data.setdefault("transaction_date", None)
         logger.info(
             "Successfully parsed transaction from text",
             extra={"parsed_data": data},
@@ -66,15 +82,19 @@ async def parse_transaction_from_text(text: str) -> dict | None:
 
 
 async def parse_transaction_from_audio(
-    audio_bytes: bytes, mime_type: str
+    audio_bytes: bytes,
+    mime_type: str,
+    current_datetime: datetime | str | None = None,
 ) -> dict | None:
     try:
+        dt_str = _get_formatted_datetime(current_datetime)
+        system_instruction = SYSTEM_PROMPT.format(current_datetime=dt_str)
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
         response = await client.aio.models.generate_content(
             model=settings.gemini_model,
             contents=[audio_part, "Extract transaction details from audio."],
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=system_instruction,
                 response_mime_type="application/json",
             ),
         )
@@ -87,6 +107,7 @@ async def parse_transaction_from_audio(
             return None
         data.setdefault("currency", "ARS")
         data.setdefault("tags", [])
+        data.setdefault("transaction_date", None)
         logger.info(
             "Successfully parsed transaction from audio",
             extra={"mime_type": mime_type, "parsed_data": data},
@@ -99,3 +120,4 @@ async def parse_transaction_from_audio(
             exc_info=True,
         )
         return None
+

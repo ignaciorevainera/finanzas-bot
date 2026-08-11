@@ -69,3 +69,50 @@ async def test_description_is_none_when_not_present(mock_client):
     assert result is not None
     assert result.get("description") is None
 
+
+@pytest.mark.asyncio
+async def test_transaction_date_extracted_when_mentioned(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(
+        return_value=make_response(
+            '{"type":"expense","amount":5000,"currency":"ARS","category":"food",'
+            '"description":"cena","transaction_date":"2026-08-10 21:00:00"}'
+        )
+    )
+    from app.gemini_ai import parse_transaction_from_text
+    result = await parse_transaction_from_text("gaste 5000 en cena ayer")
+    assert result is not None
+    assert result.get("transaction_date") == "2026-08-10 21:00:00"
+
+
+@pytest.mark.asyncio
+async def test_transaction_date_default_none_when_omitted(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(
+        return_value=make_response(
+            '{"type":"expense","amount":5000,"currency":"ARS","category":"food",'
+            '"description":"cena"}'
+        )
+    )
+    from app.gemini_ai import parse_transaction_from_text
+    result = await parse_transaction_from_text("gaste 5000 en cena")
+    assert result is not None
+    assert result.get("transaction_date") is None
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_includes_current_datetime(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(
+        return_value=make_response(
+            '{"type":"expense","amount":5000,"currency":"ARS","category":"food"}'
+        )
+    )
+    from app.gemini_ai import parse_transaction_from_text
+    test_dt = "2026-08-11 12:00:00"
+    await parse_transaction_from_text("gaste 5000", current_datetime=test_dt)
+    
+    call_args = mock_client.aio.models.generate_content.call_args
+    assert call_args is not None
+    config = call_args.kwargs.get("config")
+    assert config is not None
+    assert f"The current date and time is {test_dt}." in config.system_instruction
+
+
