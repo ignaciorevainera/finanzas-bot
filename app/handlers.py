@@ -14,7 +14,11 @@ from app.database import (
     insert_transaction,
     delete_transaction,
 )
-from app.gemini_ai import parse_transaction_from_text, parse_transaction_from_audio
+from app.gemini_ai import (
+    parse_transaction_from_text,
+    parse_transaction_from_audio,
+    parse_date_from_text,
+)
 
 CATEGORY_LABELS: dict[str, str] = {
     "food": "Comida",
@@ -217,9 +221,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if state and state.get("action") == "wait_custom_date":
         await update.message.chat.send_action(action="typing")
-        parsed_data = await parse_transaction_from_text(text)
-        if parsed_data and parsed_data.get("transaction_date"):
-            state["data"]["transaction_date"] = parsed_data["transaction_date"]
+        date_str = await parse_date_from_text(text)
+        if date_str:
+            state["data"]["transaction_date"] = date_str
             pending_transactions[chat_id] = {"action": "confirm", "data": state["data"]}
             await _send_confirm_message(update, state["data"])
         else:

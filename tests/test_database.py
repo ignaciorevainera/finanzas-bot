@@ -84,6 +84,29 @@ async def test_insert_transaction_with_iso_string_date():
 
 
 @pytest.mark.asyncio
+async def test_insert_transaction_with_invalid_iso_string_date_fallback():
+    mock_pool = MagicMock()
+    mock_pool.fetchrow = AsyncMock(return_value={"id": "fake-uuid"})
+    database.pool = mock_pool
+
+    data = {
+        "type": "expense",
+        "amount": 1500.0,
+        "category": "food",
+        "payment_method": "cash",
+        "transaction_date": "not-a-valid-date",
+    }
+
+    await database.insert_transaction(data)
+    mock_pool.fetchrow.assert_called_once()
+    args = mock_pool.fetchrow.call_args[0]
+    assert args[13] is None
+
+    database.pool = None
+
+
+
+@pytest.mark.asyncio
 async def test_queries_use_transaction_date():
     assert "transaction_date" in database.CREATE_TABLE_SQL
     assert "transaction_date" in database.ALTER_ADD_TRANSACTION_DATE_SQL

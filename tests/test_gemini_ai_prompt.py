@@ -116,3 +116,40 @@ async def test_system_prompt_includes_current_datetime(mock_client):
     assert f"The current date and time is {test_dt}." in config.system_instruction
 
 
+@pytest.mark.asyncio
+async def test_parse_date_from_text_success(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(
+        return_value=make_response('{"date": "2026-08-10 14:00:00"}')
+    )
+    from app.gemini_ai import parse_date_from_text
+    result = await parse_date_from_text("ayer")
+    assert result == "2026-08-10 14:00:00"
+
+
+@pytest.mark.asyncio
+async def test_parse_date_from_text_error_returns_none(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(
+        return_value=make_response('{"error": "no date found"}')
+    )
+    from app.gemini_ai import parse_date_from_text
+    result = await parse_date_from_text("hola")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_parse_date_from_text_includes_current_datetime(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(
+        return_value=make_response('{"date": "2026-08-10"}')
+    )
+    from app.gemini_ai import parse_date_from_text
+    test_dt = "2026-08-11 12:00:00"
+    await parse_date_from_text("ayer", current_datetime=test_dt)
+
+    call_args = mock_client.aio.models.generate_content.call_args
+    assert call_args is not None
+    config = call_args.kwargs.get("config")
+    assert config is not None
+    assert f"The current date and time is {test_dt}." in config.system_instruction
+
+
+

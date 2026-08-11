@@ -176,7 +176,7 @@ async def test_callback_date_custom_prompts_user_text_input():
 
 
 @pytest.mark.asyncio
-@patch("app.handlers.parse_transaction_from_text")
+@patch("app.handlers.parse_date_from_text")
 async def test_message_handler_wait_custom_date_success(mock_parse):
     from app import handlers
     handlers.pending_transactions.clear()
@@ -188,7 +188,7 @@ async def test_message_handler_wait_custom_date_success(mock_parse):
             "transaction_date": None,
         },
     }
-    mock_parse.return_value = {"transaction_date": "2026-08-08 14:00:00"}
+    mock_parse.return_value = "2026-08-08 14:00:00"
     update = make_update(text="el sabado pasado", chat_id=123)
     context = MagicMock()
     await handlers.message_handler(update, context)
@@ -200,7 +200,7 @@ async def test_message_handler_wait_custom_date_success(mock_parse):
 
 
 @pytest.mark.asyncio
-@patch("app.handlers.parse_transaction_from_text")
+@patch("app.handlers.parse_date_from_text")
 async def test_message_handler_wait_custom_date_failure(mock_parse):
     from app import handlers
     handlers.pending_transactions.clear()
@@ -221,6 +221,7 @@ async def test_message_handler_wait_custom_date_failure(mock_parse):
     assert state["action"] == "wait_custom_date"
     update.message.reply_text.assert_called_once()
     assert "No pude entender la fecha" in update.message.reply_text.call_args[0][0]
+
 
 
 def test_spanish_labels_defined():

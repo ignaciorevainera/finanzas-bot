@@ -34,6 +34,14 @@ Return ONLY a JSON object with the following fields:
 
 If the input does not describe a valid transaction, return JSON with key "error": "invalid transaction"."""
 
+DATE_SYSTEM_PROMPT = """You are a helper that extracts a specific date and time from user input.
+The current date and time is {current_datetime}.
+Return ONLY a JSON object with the following fields:
+- date: ISO 8601 string ("YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS") resolved relative to current date and time; null if no date/time can be inferred.
+
+If the input does not contain a date or time expression, return JSON with key "error": "no date found"."""
+
+
 
 def _get_formatted_datetime(current_datetime: datetime | str | None) -> str:
     if current_datetime is None:
@@ -120,4 +128,47 @@ async def parse_transaction_from_audio(
             exc_info=True,
         )
         return None
+
+
+async def parse_date_from_text(
+    text: str, current_datetime: datetime | str | None = None
+) -> str | None:
+    try:
+        dt_str = _get_formatted_datetime(current_datetime)
+        system_instruction = DATE_SYSTEM_PROMPT.format(current_datetime=dt_str)
+        response = await client.aio.models.generate_content(
+            model=settings.gemini_model,
+            contents=text,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+            ),
+        )
+        data = json.loads(clean_json_text(response.text))
+        if "error" in data or not isinstance(data, dict):
+            logger.warning(
+                "Failed to parse date from text: invalid structure",
+                extra={"input_text": text, "response_data": data},
+            )
+            return None
+        date_val = data.get("date")
+        if not date_val or not isinstance(date_val, str):
+            logger.warning(
+                "Failed to parse date from text: date missing or not string",
+                extra={"input_text": text, "response_data": data},
+            )
+            return None
+        logger.info(
+            "Successfully parsed date from text",
+            extra={"parsed_date": date_val},
+        )
+        return date_val
+    except Exception as exc:
+        logger.error(
+            "Error parsing date from text",
+            extra={"input_text": text, "error": str(exc)},
+            exc_info=True,
+        )
+        return None
+
 

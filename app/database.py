@@ -129,7 +129,15 @@ async def insert_transaction(data: dict) -> asyncpg.Record:
     try:
         tx_date = data.get("transaction_date")
         if isinstance(tx_date, str):
-            tx_date = datetime.fromisoformat(tx_date)
+            try:
+                tx_date = datetime.fromisoformat(tx_date)
+            except ValueError:
+                logger.warning(
+                    "Invalid ISO format for transaction_date '%s', falling back to None",
+                    tx_date,
+                )
+                tx_date = None
+
 
         return await pool.fetchrow(
             INSERT_SQL,
