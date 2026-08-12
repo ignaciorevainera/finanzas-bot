@@ -99,6 +99,8 @@ IA no infiere datos ambiguos. Si contexto nuevo es explícito, reemplaza dato an
 9. `Aceptar` persiste en Neon.
 10. `Cancelar` descarta.
 11. `Agregar más` toma siguiente mensaje solo como contexto de transacción pendiente; después vuelve a confirmación.
+12. Usuario puede repetir `Agregar más` en bucle; cada iteración actualiza contexto y vuelve a mostrar confirmación.
+13. Bucle termina únicamente con `Aceptar` o `Cancelar`.
 
 Confirmación muestra tipo, monto personal, monto total, moneda, categoría, descripción, comercio, método, fecha, estado, participantes, distribución, cuotas, recurrencia, vencimiento, ubicación, etiquetas y notas cuando tengan valor.
 
@@ -145,6 +147,6 @@ Segundo plan consumirá contrato de transacción estabilizado.
 - `description` contiene solo concepto/título; contexto adicional usa campos específicos, `tags` o `notes`.
 - Gastos e ingresos compartidos preservan total y parte personal.
 - Estadísticas personales no cuentan partes de terceros.
-- Usuario puede enriquecer movimiento una vez antes de aceptar.
+- Usuario puede enriquecer movimiento repetidamente antes de aceptar.
 - Reportes no dependen de SQL generado por IA.
 - Cada plan puede probarse y desplegarse de forma independiente.
