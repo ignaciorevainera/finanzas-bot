@@ -19,6 +19,7 @@ from app.gemini_ai import (
     parse_transaction_from_audio,
     parse_date_from_text,
     parse_report_request,
+    _normalize_report_value,
 )
 from app.reporting import ReportRequest, run_report, format_report
 from app.transaction_schema import (
@@ -203,6 +204,8 @@ async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(REPORT_USAGE_TEXT)
         return
     metric, value = parsed
+    if value is not None:
+        value = _normalize_report_value(metric, value)
     start, end = _current_month_period()
     await send_report(update, ReportRequest(metric, start, end, value=value))
 

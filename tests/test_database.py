@@ -355,7 +355,7 @@ async def test_get_report_by_dimension_merchant_binds_value_filter():
     await database.get_report_by_dimension("merchant", start, end, "Restaurante")
 
     sql, *params = mock_pool.fetch.call_args.args
-    assert "merchant = $3" in sql
+    assert "LOWER(merchant) = LOWER($3)" in sql
     assert params == [start, end, "Restaurante"]
 
     database.pool = None
@@ -389,7 +389,7 @@ async def test_get_report_by_dimension_location_binds_value_filter():
     await database.get_report_by_dimension("location", start, end, "Centro")
 
     sql, *params = mock_pool.fetch.call_args.args
-    assert "location = $3" in sql
+    assert "LOWER(location) = LOWER($3)" in sql
     assert params == [start, end, "Centro"]
 
     database.pool = None

@@ -63,7 +63,7 @@ Return ONLY a JSON object with the following fields:
 - start: ISO 8601 timestamp with timezone, start of the report period (inclusive), e.g. "2026-08-01T00:00:00+00:00"
 - end: ISO 8601 timestamp with timezone, end of the report period (exclusive), e.g. "2026-09-01T00:00:00+00:00"
 - group_by: string or null; optional grouping
-- value: string or null; filter value for the metric (category, payment method, person, or tag)
+- value: string or null; filter value for the metric (category, merchant, location, payment method, person, or tag)
 
 Return null for any field without an explicit value.
 If the input does not describe a report request, return JSON with key "error": "unsupported report".
@@ -110,7 +110,7 @@ def _normalize_report_value(metric: str, value: str) -> str:
         return normalize_transaction({"category": value})["category"]
     if metric == "payment_method":
         return normalize_transaction({"payment_method": value})["payment_method"]
-    if metric in ("person", "tag"):
+    if metric in ("person", "tag", "merchant", "location"):
         tags = normalize_transaction({"tags": [value]})["tags"]
         return tags[0] if tags else value
     return value

@@ -60,6 +60,21 @@ async def test_report_command_spanish_metric_alias(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_report_command_normalizes_merchant_value(monkeypatch):
+    from app import handlers
+    run_report = AsyncMock(return_value={"rows": []})
+    monkeypatch.setattr("app.handlers.run_report", run_report)
+    monkeypatch.setattr("app.handlers.format_report", lambda request, result: "ok")
+
+    update = make_update(text="/report merchant coto")
+    await handlers.report_handler(update, MagicMock())
+
+    request = run_report.await_args.args[0]
+    assert request.metric == "merchant"
+    assert request.value == "Coto"
+
+
+@pytest.mark.asyncio
 async def test_report_command_period_only_metric_has_no_value(monkeypatch):
     from app import handlers
     run_report = AsyncMock(return_value={"rows": []})

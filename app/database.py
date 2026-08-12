@@ -259,9 +259,9 @@ _DIMENSION_GROUP_EXPR = {
 
 _DIMENSION_VALUE_FILTERS = {
     "category": "category = $3",
-    "merchant": "merchant = $3",
+    "merchant": "LOWER(merchant) = LOWER($3)",
     "payment_method": "payment_method = $3",
-    "location": "location = $3",
+    "location": "LOWER(location) = LOWER($3)",
     "tag": "$3 = ANY(tags)",
 }
 

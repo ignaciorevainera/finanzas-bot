@@ -304,6 +304,36 @@ async def test_parse_report_request_normalizes_payment_method_value(mock_client)
 
 
 @pytest.mark.asyncio
+async def test_parse_report_request_normalizes_merchant_value(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
+        '{"metric":"merchant","start":"2026-08-01T00:00:00+00:00",'
+        '"end":"2026-09-01T00:00:00+00:00","value":"coto"}'
+    ))
+
+    from app.gemini_ai import parse_report_request
+
+    result = await parse_report_request("¿cuánto gasté en coto?", current_datetime="2026-08-12 12:00:00")
+
+    assert result is not None
+    assert result.value == "Coto"
+
+
+@pytest.mark.asyncio
+async def test_parse_report_request_normalizes_location_value(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
+        '{"metric":"location","start":"2026-08-01T00:00:00+00:00",'
+        '"end":"2026-09-01T00:00:00+00:00","value":"centro"}'
+    ))
+
+    from app.gemini_ai import parse_report_request
+
+    result = await parse_report_request("¿dónde gasté en el centro?", current_datetime="2026-08-12 12:00:00")
+
+    assert result is not None
+    assert result.value == "Centro"
+
+
+@pytest.mark.asyncio
 async def test_parse_report_request_includes_current_datetime(mock_client):
     mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
         '{"metric":"summary","start":"2026-08-01T00:00:00+00:00",'
