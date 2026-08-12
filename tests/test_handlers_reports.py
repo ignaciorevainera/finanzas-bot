@@ -232,3 +232,19 @@ async def test_send_report_generic_failure_text_on_unexpected_error(monkeypatch)
     update.message.reply_text.assert_awaited_once()
     text = update.message.reply_text.await_args.args[0]
     assert "error" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_report_command_formats_database_rows_end_to_end(monkeypatch):
+    from app import handlers
+    run_report = AsyncMock(
+        return_value={"rows": [{"label": "Comida", "total": 30000, "currency": "ARS"}]}
+    )
+    monkeypatch.setattr("app.handlers.run_report", run_report)
+
+    update = make_update(text="/report category Comida")
+    await handlers.report_handler(update, MagicMock())
+
+    text = update.message.reply_text.await_args.args[0]
+    assert "Comida" in text
+    assert "30000" in text

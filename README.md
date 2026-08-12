@@ -10,6 +10,7 @@ Agent-oriented context and operational reference for this repository.
 - [Bot Commands](#bot-commands)
 - [Development Standards](#development-standards)
 - [Transaction Registration Flow](#transaction-registration-flow)
+- [Finance Reports](#finance-reports)
 - [Database Schema (PostgreSQL 18)](#database-schema-postgresql-18)
 - [Environment Variables](#environment-variables)
 - [Deployment (Render)](#deployment-render)
@@ -46,7 +47,8 @@ Extracted data is stored in a serverless PostgreSQL 18 database on Neon. The app
 
 - `/start`: Initialize interaction and webhook context.
 - `/help`: Show available commands and usage guidance.
-- `/summary`: Generate financial summaries and category aggregations.
+- `/summary`: Generate a financial summary for the current month.
+- `/report`: Generate a dimension or advanced financial report (`/report <métrica> [valor]`).
 - `/recent`: List recent transactions.
 - `/delete`: Remove specific transaction records.
 - `/export`: Export transaction history in structured format.
@@ -65,6 +67,44 @@ Extracted data is stored in a serverless PostgreSQL 18 database on Neon. The app
 5. **Shared distribution** — if the transaction is shared (`amount != total_amount`, participants present, or a split detected), the bot asks for the **exact per-person distribution**; amounts must sum to `total_amount`.
 6. **Confirmation** — full transaction summary with inline keyboard `Aceptar` / `Agregar más` / `Cancelar`.
 7. **Agregar más loop** — the user may send extra details (place, tags, cuotas, etc.). Explicit values **replace** the existing context, missing/ambiguous values **preserve** it, `notes` are appended, `tags` are unioned. The loop repeats until `Aceptar` (persist) or `Cancelar` (discard).
+
+## Finance Reports
+
+Financial reports aggregate stored transactions over a period. Both `/summary` and `/report` route through the shared report service (`app/reporting.py`): each request is validated as a typed `ReportRequest` and executed as a read-only query — nothing is persisted.
+
+### Commands
+
+- `/summary` — summary for the current month: personal income, personal expenses, shared total, and net flow.
+- `/report <métrica> [valor]` — dimension or advanced report for the current month.
+
+Examples:
+
+- `/report category Comida`
+- `/report shared`
+- `/report tag Trabajo`
+
+### Natural language reports
+
+Question-shaped messages (containing `?` or `¿`) are interpreted by Gemini into a typed `ReportRequest` (metric plus optional filter value). Gemini returns **intent, never SQL** — the bot builds and executes its own allowlisted queries.
+
+Examples:
+
+- `¿Cuánto gasté en comida este mes?` — category report filtered to `Comida`.
+- `¿Cuánto pago en cuotas este mes?` — installments report.
+
+### Report dimensions
+
+`summary`, `category`, `merchant`, `payment_method`, `location`, `person`, `tag`, `installments`, `recurrence`, `due_dates`, `transfers`, `refunds`, `packages`, `shared`.
+
+Dimension metrics (`category`, `merchant`, `payment_method`, `location`, `person`, `tag`) accept an optional value filter (`/report category Comida`); period-only metrics (`/report shared`) accept none.
+
+### Period semantics
+
+Report periods are half-open `[start, end)`: `start` is inclusive, `end` is exclusive. Commands default to the current calendar month. Transactions with `status = Cancelado` are excluded from every report.
+
+### Personal-share semantics
+
+Personal reports aggregate `amount` (the user's personal share). Shared reports expose both `amount` and `total_amount` per row. `person` reports drop the reserved `user` pseudo-participant (the personal share, already shown as `amount`).
 
 ## Database Schema (PostgreSQL 18)
 

@@ -1,10 +1,19 @@
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 from app.reporting import ReportRequest, format_report, run_report
+
+
+def test_readme_documents_command_and_natural_language_reports():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "/report" in readme
+    assert "¿Cuánto gasté en comida este mes?" in readme
+    assert "amount" in readme
+    assert "total_amount" in readme
 
 
 def _request(metric: str, value: str | None = None) -> ReportRequest:
@@ -332,3 +341,21 @@ async def test_run_report_raises_value_error_for_unroutable_metric(monkeypatch):
         await run_report(request)
 
     mock_summary.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_category_report_formats_database_rows(monkeypatch):
+    monkeypatch.setattr(
+        "app.reporting.get_report_by_dimension",
+        AsyncMock(return_value=[{"label": "Comida", "total": 30000, "currency": "ARS"}]),
+    )
+    request = ReportRequest(
+        "category",
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+
+    text = format_report(request, await run_report(request))
+
+    assert "Comida" in text
+    assert "30000" in text
