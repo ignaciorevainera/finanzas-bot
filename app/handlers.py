@@ -241,6 +241,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(MISSING_FIELD_PROMPTS[field])
             return
         state["data"][field] = value
+        if field == "amount" and state["data"].get("total_amount") in (None, ""):
+            state["data"]["total_amount"] = value
         state["missing_index"] += 1
         if state["missing_index"] < len(state["missing_fields"]):
             pending_transactions[chat_id] = state

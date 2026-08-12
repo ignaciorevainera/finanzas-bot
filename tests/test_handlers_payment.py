@@ -764,6 +764,42 @@ async def test_pick_missing_ambiguous_amount_answer_reasks_amount():
     assert "monto" in update.message.reply_text.call_args[0][0].lower()
 
 
+@pytest.mark.asyncio
+async def test_pick_missing_amount_answer_sets_amount_and_total_amount():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "data": {"transaction_date": "2026-08-10 12:00:00"},
+        "missing_fields": ["amount"],
+        "missing_index": 0,
+    }
+    update = make_update(text="500", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["data"]["amount"] == 500
+    assert state["data"]["total_amount"] == 500
+
+
+@pytest.mark.asyncio
+async def test_pick_missing_amount_answer_preserves_existing_total_amount():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "data": {"total_amount": 120000, "transaction_date": "2026-08-10 12:00:00"},
+        "missing_fields": ["amount"],
+        "missing_index": 0,
+    }
+    update = make_update(text="30000", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["data"]["amount"] == 30000
+    assert state["data"]["total_amount"] == 120000
+
+
 def test_split_is_valid_requires_known_total_amount():
     from app.handlers import _split_is_valid
     assert _split_is_valid(
