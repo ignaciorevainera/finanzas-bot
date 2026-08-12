@@ -1,8 +1,36 @@
 from datetime import datetime, timezone
+from pathlib import Path
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app import database
+
+
+def test_schema_documentation_mentions_personal_and_total_amounts():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "total_amount" in readme
+    assert "amount" in readme
+    assert "Agregar más" in readme
+
+
+def test_schema_documentation_describes_spanish_canonical_values():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    for value in (
+        "Gasto", "Ingreso",
+        "Completado", "Pendiente", "Cancelado",
+        "Efectivo", "Tarjeta de Débito", "Tarjeta de Crédito", "Transferencia", "Otro",
+    ):
+        assert value in readme
+
+
+def test_schema_documentation_describes_advanced_columns_and_amount_semantics():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    for field in (
+        "due_date", "recurrence", "installment_number", "installment_total",
+        "participants", "split_details", "transfer_details", "package_details",
+        "related_transaction_id",
+    ):
+        assert field in readme
 
 
 @pytest.mark.asyncio

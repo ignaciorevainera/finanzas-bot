@@ -1,5 +1,23 @@
+from pathlib import Path
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+
+def test_registration_flow_documentation_describes_defaults_and_required_fields():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "currency" in readme
+    assert "ARS" in readme
+    assert "status" in readme
+    assert "Completado" in readme
+    for field in ("type", "amount", "category", "description", "payment_method"):
+        assert field in readme
+
+
+def test_registration_flow_documentation_describes_split_and_add_context_loop():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "Agregar más" in readme
+    assert "Aceptar" in readme
+    assert "Cancelar" in readme
 
 
 @pytest.fixture(autouse=True)
