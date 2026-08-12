@@ -37,11 +37,17 @@ def test_report_request_keeps_half_open_timezone_aware_period():
     assert request.value == "Comida"
 
 
-def test_report_request_defaults_group_by_and_value_to_none():
+def test_report_request_defaults_value_to_none():
     request = _request("summary")
 
-    assert request.group_by is None
     assert request.value is None
+
+
+def test_report_request_has_no_group_by_field():
+    request = _request("summary")
+
+    with pytest.raises(AttributeError):
+        request.group_by
 
 
 def test_report_request_is_immutable():

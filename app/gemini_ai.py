@@ -62,7 +62,6 @@ Return ONLY a JSON object with the following fields:
 - metric: one of ["summary", "category", "merchant", "payment_method", "location", "person", "tag", "installments", "recurrence", "due_dates", "transfers", "refunds", "packages", "shared"]
 - start: ISO 8601 timestamp with timezone, start of the report period (inclusive), e.g. "2026-08-01T00:00:00+00:00"
 - end: ISO 8601 timestamp with timezone, end of the report period (exclusive), e.g. "2026-09-01T00:00:00+00:00"
-- group_by: string or null; optional grouping
 - value: string or null; filter value for the metric (category, merchant, location, payment method, person, or tag)
 
 Return null for any field without an explicit value.
@@ -134,9 +133,6 @@ def _finalize_report_request(data) -> ReportRequest | None:
         return None
     if end_dt <= start_dt:
         return None
-    group_by = data.get("group_by")
-    if not isinstance(group_by, str):
-        group_by = None
     value = data.get("value")
     if value is not None:
         if not isinstance(value, str):
@@ -144,8 +140,7 @@ def _finalize_report_request(data) -> ReportRequest | None:
         value = _normalize_report_value(metric, value)
     try:
         return ReportRequest(
-            metric=metric, start=start_dt, end=end_dt,
-            group_by=group_by, value=value,
+            metric=metric, start=start_dt, end=end_dt, value=value,
         )
     except ValueError:
         return None

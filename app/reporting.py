@@ -76,7 +76,6 @@ class ReportRequest:
     metric: ReportMetric
     start: datetime
     end: datetime
-    group_by: str | None = None
     value: str | None = None
 
     def __post_init__(self) -> None:

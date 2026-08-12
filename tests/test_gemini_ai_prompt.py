@@ -333,6 +333,28 @@ async def test_parse_report_request_normalizes_location_value(mock_client):
     assert result.value == "Centro"
 
 
+def test_report_prompt_does_not_instruct_group_by():
+    from app.gemini_ai import REPORT_SYSTEM_PROMPT
+
+    assert "group_by" not in REPORT_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_parse_report_request_has_no_group_by_field(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
+        '{"metric":"summary","start":"2026-08-01T00:00:00+00:00",'
+        '"end":"2026-09-01T00:00:00+00:00"}'
+    ))
+
+    from app.gemini_ai import parse_report_request
+
+    result = await parse_report_request("resumen del mes", current_datetime="2026-08-12 12:00:00")
+
+    assert result is not None
+    with pytest.raises(AttributeError):
+        result.group_by
+
+
 @pytest.mark.asyncio
 async def test_parse_report_request_includes_current_datetime(mock_client):
     mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
