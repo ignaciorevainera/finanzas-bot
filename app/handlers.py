@@ -353,11 +353,13 @@ def _parse_missing_field_answer(field: str, text: str) -> str | float | None:
     if not value:
         return None
     if field == "amount":
-        match = re.search(r"\d+(?:[.,]\d+)?", value)
-        if not match:
+        matches = re.findall(r"\d+(?:[.,]\d+)?", value)
+        if len(matches) != 1:
+            return None
+        if _amount_answer_is_ambiguous(value):
             return None
         try:
-            num = float(match.group().replace(",", "."))
+            num = float(matches[0].replace(",", "."))
         except ValueError:
             return None
         return int(num) if num.is_integer() else num
@@ -369,6 +371,16 @@ def _parse_missing_field_answer(field: str, text: str) -> str | float | None:
         )
         return _match_canonical_vocab(value, field, canonical_values)
     return normalize_transaction({field: value}).get(field)
+
+
+_AMBIGUOUS_AMOUNT_WORDS = frozenset(
+    {"mil", "miles", "millon", "millones", "y", "mas", "aprox", "cerca", "alrededor"}
+)
+
+
+def _amount_answer_is_ambiguous(value: str) -> bool:
+    words = set(re.findall(r"[a-z]+", _strip_diacritics(value).lower()))
+    return bool(words & _AMBIGUOUS_AMOUNT_WORDS)
 
 
 def _match_canonical_vocab(value: str, field: str, canonical_values: tuple[str, ...]) -> str | None:

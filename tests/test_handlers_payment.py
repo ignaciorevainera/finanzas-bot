@@ -737,6 +737,33 @@ async def test_parser_supplied_split_with_wrong_user_share_reenters_pick_split()
     assert "distribución" in update.message.reply_text.call_args[0][0].lower()
 
 
+def test_amount_answer_with_worded_magnitude_is_ambiguous():
+    from app.handlers import _parse_missing_field_answer
+    assert _parse_missing_field_answer("amount", "2 mil pesos") is None
+    assert _parse_missing_field_answer("amount", "yo puse 3000 y ella 5000") is None
+    assert _parse_missing_field_answer("amount", "3000") == 3000
+
+
+@pytest.mark.asyncio
+async def test_pick_missing_ambiguous_amount_answer_reasks_amount():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "data": {"transaction_date": "2026-08-10 12:00:00"},
+        "missing_fields": ["amount"],
+        "missing_index": 0,
+    }
+    update = make_update(text="2 mil pesos", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_missing"
+    assert state["missing_index"] == 0
+    assert "amount" not in state["data"]
+    assert "monto" in update.message.reply_text.call_args[0][0].lower()
+
+
 def test_split_is_valid_requires_known_total_amount():
     from app.handlers import _split_is_valid
     assert _split_is_valid(
