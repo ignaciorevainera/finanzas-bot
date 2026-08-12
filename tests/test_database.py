@@ -22,8 +22,24 @@ async def test_init_db_runs_migrations():
         constraint_sql = "\n".join(calls)
         assert "DROP CONSTRAINT IF EXISTS" in constraint_sql
         assert "ADD CONSTRAINT" in constraint_sql
+        assert "UPDATE transactions SET total_amount = amount" in constraint_sql
+        assert "ALTER COLUMN total_amount SET NOT NULL" in constraint_sql
+        assert "UPDATE transactions SET type = 'Ingreso'" in constraint_sql
+        assert "SET NOT NULL" in database.ALTER_TOTAL_AMOUNT_NOT_NULL_SQL
+        assert "WHERE total_amount IS NULL" in database.UPDATE_TOTAL_AMOUNT_SQL
+        assert "ALTER COLUMN total_amount SET NOT NULL" in database.ALTER_TOTAL_AMOUNT_NOT_NULL_SQL
 
     database.pool = None
+
+
+def test_migrations_harden_against_legacy_rows():
+    migration_sql = "\n".join(database.STARTUP_MIGRATIONS)
+    assert "ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12, 2);" in migration_sql
+    assert "UPDATE transactions SET total_amount = amount" in migration_sql
+    assert "SET NOT NULL;" in migration_sql
+    assert "UPDATE transactions SET type = 'Ingreso'" in migration_sql
+    assert "UPDATE transactions SET status = 'Completado'" in migration_sql
+    assert "UPDATE transactions SET payment_method = 'Efectivo'" in migration_sql
 
 
 def test_create_table_contains_advanced_transaction_fields():

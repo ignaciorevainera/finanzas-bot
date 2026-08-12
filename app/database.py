@@ -55,7 +55,34 @@ ADD COLUMN IF NOT EXISTS transaction_date TIMESTAMP WITH TIME ZONE;
 
 ALTER_ADD_TOTAL_AMOUNT_SQL = """
 ALTER TABLE transactions
-ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12, 2) NOT NULL;
+ADD COLUMN IF NOT EXISTS total_amount DECIMAL(12, 2);
+"""
+
+UPDATE_TOTAL_AMOUNT_SQL = """
+UPDATE transactions SET total_amount = amount WHERE total_amount IS NULL;
+"""
+
+ALTER_TOTAL_AMOUNT_NOT_NULL_SQL = """
+ALTER TABLE transactions ALTER COLUMN total_amount SET NOT NULL;
+"""
+
+UPDATE_LEGACY_TYPE_VALUES_SQL = """
+UPDATE transactions SET type = 'Ingreso' WHERE type = 'income';
+UPDATE transactions SET type = 'Gasto' WHERE type = 'expense';
+"""
+
+UPDATE_LEGACY_STATUS_VALUES_SQL = """
+UPDATE transactions SET status = 'Completado' WHERE status = 'completed';
+UPDATE transactions SET status = 'Pendiente' WHERE status = 'pending';
+UPDATE transactions SET status = 'Cancelado' WHERE status = 'cancelled';
+"""
+
+UPDATE_LEGACY_PAYMENT_METHOD_VALUES_SQL = """
+UPDATE transactions SET payment_method = 'Efectivo' WHERE payment_method = 'cash';
+UPDATE transactions SET payment_method = 'Tarjeta de Débito' WHERE payment_method = 'debit card';
+UPDATE transactions SET payment_method = 'Tarjeta de Crédito' WHERE payment_method = 'credit card';
+UPDATE transactions SET payment_method = 'Transferencia' WHERE payment_method = 'transfer';
+UPDATE transactions SET payment_method = 'Otro' WHERE payment_method = 'other';
 """
 
 ALTER_ADD_DUE_DATE_SQL = """
@@ -149,6 +176,8 @@ STARTUP_MIGRATIONS = (
     ALTER_ADD_DESCRIPTION_SQL,
     ALTER_ADD_TRANSACTION_DATE_SQL,
     ALTER_ADD_TOTAL_AMOUNT_SQL,
+    UPDATE_TOTAL_AMOUNT_SQL,
+    ALTER_TOTAL_AMOUNT_NOT_NULL_SQL,
     ALTER_ADD_DUE_DATE_SQL,
     ALTER_ADD_RECURRENCE_SQL,
     ALTER_ADD_INSTALLMENT_NUMBER_SQL,
@@ -158,6 +187,9 @@ STARTUP_MIGRATIONS = (
     ALTER_ADD_TRANSFER_DETAILS_SQL,
     ALTER_ADD_PACKAGE_DETAILS_SQL,
     ALTER_ADD_RELATED_TRANSACTION_ID_SQL,
+    UPDATE_LEGACY_TYPE_VALUES_SQL,
+    UPDATE_LEGACY_STATUS_VALUES_SQL,
+    UPDATE_LEGACY_PAYMENT_METHOD_VALUES_SQL,
     ALTER_TYPE_CHECK_SQL,
     ALTER_STATUS_CHECK_SQL,
     ALTER_PAYMENT_METHOD_CHECK_SQL,
