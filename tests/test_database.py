@@ -16,13 +16,48 @@ async def test_init_db_runs_migrations():
     with patch("app.database.asyncpg.create_pool", AsyncMock(return_value=mock_pool)):
         await database.init_db()
 
-        assert mock_conn.execute.call_count == 5
+        assert mock_conn.execute.call_count == len(database.STARTUP_MIGRATIONS)
         calls = [c[0][0] for c in mock_conn.execute.call_args_list]
-        assert database.CREATE_TABLE_SQL in calls
-        assert database.ALTER_ADD_DESCRIPTION_SQL in calls
-        assert database.ALTER_ADD_TRANSACTION_DATE_SQL in calls
-        assert database.UPDATE_NULL_TRANSACTION_DATE_SQL in calls
-        assert database.ALTER_SET_DEFAULT_TRANSACTION_DATE_SQL in calls
+        assert calls == list(database.STARTUP_MIGRATIONS)
+        constraint_sql = "\n".join(calls)
+        assert "DROP CONSTRAINT IF EXISTS" in constraint_sql
+        assert "ADD CONSTRAINT" in constraint_sql
+
+    database.pool = None
+
+
+def test_create_table_contains_advanced_transaction_fields():
+    for field in (
+        "total_amount", "due_date", "recurrence", "installment_number",
+        "installment_total", "participants", "split_details",
+        "transfer_details", "package_details", "related_transaction_id",
+    ):
+        assert field in database.CREATE_TABLE_SQL
+
+
+@pytest.mark.asyncio
+async def test_insert_transaction_passes_advanced_fields_in_stable_order():
+    mock_pool = MagicMock()
+    mock_pool.fetchrow = AsyncMock(return_value={"id": "fake-uuid"})
+    database.pool = mock_pool
+    data = {
+        "type": "Gasto", "amount": 30000, "total_amount": 120000,
+        "currency": "ARS", "category": "Comida", "description": "Cena",
+        "merchant": "Restaurante", "payment_method": "Efectivo",
+        "status": "Completado", "tags": ["Familia"], "location": "Centro",
+        "notes": "Con Viole", "transaction_date": "2026-08-12T20:00:00+00:00",
+        "due_date": None, "recurrence": None, "installment_number": None,
+        "installment_total": None, "participants": ["Viole"],
+        "split_details": {"user": 30000, "Viole": 90000},
+        "transfer_details": None, "package_details": None,
+        "related_transaction_id": None,
+    }
+
+    await database.insert_transaction(data)
+    args = mock_pool.fetchrow.call_args.args
+    assert args[0] == database.INSERT_SQL
+    assert args[3] == 120000
+    assert args[18] == ["Viole"]
 
     database.pool = None
 
