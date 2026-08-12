@@ -150,3 +150,11 @@ async def test_queries_use_transaction_date():
     assert "transaction_date" in database.MONTHLY_TOTALS_SQL
     assert "transaction_date" in database.RECENT_SQL
     assert "transaction_date" in database.ALL_SQL
+
+
+def test_queries_filter_on_spanish_status_and_type():
+    monthly_sql = database.MONTHLY_SUMMARY_SQL + database.MONTHLY_TOTALS_SQL
+    for spanish_value in ("'Completado'", "'Ingreso'", "'Gasto'"):
+        assert spanish_value in monthly_sql
+    for english_literal in ("'completed'", "'income'", "'expense'"):
+        assert english_literal not in monthly_sql

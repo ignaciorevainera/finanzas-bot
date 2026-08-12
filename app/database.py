@@ -186,18 +186,18 @@ MONTHLY_SUMMARY_SQL = """
 SELECT type, category, SUM(amount) AS total
 FROM transactions
 WHERE date_trunc('month', transaction_date) = date_trunc('month', CURRENT_TIMESTAMP)
-  AND status = 'completed'
+  AND status = 'Completado'
 GROUP BY type, category
 ORDER BY type, total DESC;
 """
 
 MONTHLY_TOTALS_SQL = """
 SELECT
-    COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) AS total_income,
-    COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) AS total_expenses
+    COALESCE(SUM(CASE WHEN type = 'Ingreso' THEN amount ELSE 0 END), 0) AS total_income,
+    COALESCE(SUM(CASE WHEN type = 'Gasto' THEN amount ELSE 0 END), 0) AS total_expenses
 FROM transactions
 WHERE date_trunc('month', transaction_date) = date_trunc('month', CURRENT_TIMESTAMP)
-  AND status = 'completed';
+  AND status = 'Completado';
 """
 
 RECENT_SQL = """
