@@ -275,7 +275,14 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         merged = merge_transaction_context(state["data"], additions)
-        if _needs_split_question(merged):
+        split_fields_changed = (
+            merged.get("split_details")
+            and any(
+                merged.get(field) != state["data"].get(field)
+                for field in ("amount", "total_amount", "participants")
+            )
+        )
+        if _needs_split_question(merged) or split_fields_changed:
             pending_transactions[chat_id] = {"action": "pick_split", "data": merged}
             await update.message.reply_text(SPLIT_PROMPT)
             return

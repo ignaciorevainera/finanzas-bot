@@ -623,3 +623,59 @@ async def test_add_context_introducing_participants_enters_pick_split(monkeypatc
     assert state["action"] == "pick_split"
     assert state["data"]["participants"] == ["Viole"]
     assert "distribución" in update.message.reply_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_add_context_changing_total_revalidates_existing_split(monkeypatch):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    chat_id = 123
+    handlers.pending_transactions[chat_id] = {
+        "action": "add_context",
+        "data": {
+            "type": "Gasto", "amount": 30000, "total_amount": 120000,
+            "currency": "ARS", "category": "Comida", "description": "Cena",
+            "payment_method": "Efectivo", "participants": ["Viole"],
+            "split_details": {"user": 30000, "Viole": 90000},
+            "transaction_date": "2026-08-10 12:00:00",
+        },
+    }
+    monkeypatch.setattr(
+        "app.handlers.parse_transaction_from_text",
+        AsyncMock(return_value={"total_amount": 140000}),
+    )
+    update = make_update(text="no, eran 140000", chat_id=chat_id)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[chat_id]
+    assert state["action"] == "pick_split"
+    assert state["data"]["total_amount"] == 140000
+    assert "distribución" in update.message.reply_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_add_context_unchanged_split_stays_in_confirm(monkeypatch):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    chat_id = 123
+    handlers.pending_transactions[chat_id] = {
+        "action": "add_context",
+        "data": {
+            "type": "Gasto", "amount": 30000, "total_amount": 120000,
+            "currency": "ARS", "category": "Comida", "description": "Cena",
+            "payment_method": "Efectivo", "participants": ["Viole"],
+            "split_details": {"user": 30000, "Viole": 90000},
+            "transaction_date": "2026-08-10 12:00:00",
+        },
+    }
+    monkeypatch.setattr(
+        "app.handlers.parse_transaction_from_text",
+        AsyncMock(return_value={"location": "Palermo"}),
+    )
+    update = make_update(text="Fue en Palermo", chat_id=chat_id)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[chat_id]
+    assert state["action"] == "confirm"
+    assert state["data"]["split_details"] == {"user": 30000, "Viole": 90000}
+    assert state["data"]["location"] == "Palermo"
