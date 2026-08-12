@@ -18,32 +18,65 @@ def make_update(text=None, callback_data=None, chat_id=123):
 
 
 @pytest.mark.asyncio
-async def test_handle_parsed_data_asks_payment_method_when_null():
+async def test_handle_parsed_data_questions_for_first_missing_required_field():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    update = make_update(text="gaste 500")
+    context = MagicMock()
+    data = {"amount": 500, "currency": "ARS", "status": "Completado"}
+
+    await handlers.handle_parsed_data(update, context, data)
+
+    assert handlers.pending_transactions[123]["action"] == "pick_missing"
+    update.message.reply_text.assert_awaited_once()
+    assert "tipo" in update.message.reply_text.await_args.args[0].lower()
+
+
+def test_confirmation_shows_personal_and_total_amounts():
+    from app.handlers import _build_confirm_text
+    text = _build_confirm_text({
+        "type": "Gasto", "amount": 30000, "total_amount": 120000,
+        "currency": "ARS", "category": "Comida", "description": "Cena",
+        "payment_method": "Efectivo", "participants": ["Viole"],
+        "split_details": {"user": 30000, "Viole": 90000},
+    })
+
+    assert "Monto personal: $30000 ARS" in text
+    assert "Monto total: $120000 ARS" in text
+    assert "Viole" in text
+
+
+@pytest.mark.asyncio
+async def test_handle_parsed_data_questions_for_payment_method_when_null():
     from app import handlers
     handlers.pending_transactions.clear()
     update = make_update(text="gaste 5900 en jugo")
     context = MagicMock()
     data = {
-        "type": "expense", "amount": 5900, "currency": "ARS",
-        "category": "food", "merchant": None, "payment_method": None,
-        "transaction_date": None, "tags": [], "location": None, "notes": None,
+        "type": "Gasto", "amount": 5900, "currency": "ARS",
+        "category": "Comida", "merchant": None, "payment_method": None,
+        "description": "Jugo", "transaction_date": None,
+        "tags": [], "location": None, "notes": None,
     }
     await handlers.handle_parsed_data(update, context, data)
     update.message.reply_text.assert_called_once()
+    assert "método de pago" in update.message.reply_text.call_args[0][0].lower()
     state = handlers.pending_transactions[123]
-    assert state["action"] == "pick_payment"
+    assert state["action"] == "pick_missing"
+    assert state["missing_fields"] == ["payment_method"]
 
 
 @pytest.mark.asyncio
-async def test_handle_parsed_data_asks_date_when_payment_known_and_date_null():
+async def test_handle_parsed_data_asks_date_when_required_fields_known_and_date_null():
     from app import handlers
     handlers.pending_transactions.clear()
     update = make_update(text="gaste 5900 con debito")
     context = MagicMock()
     data = {
-        "type": "expense", "amount": 5900, "currency": "ARS",
-        "category": "food", "merchant": None, "payment_method": "debit card",
-        "transaction_date": None, "tags": [], "location": None, "notes": None,
+        "type": "Gasto", "amount": 5900, "currency": "ARS",
+        "category": "Comida", "merchant": None, "payment_method": "Tarjeta de Débito",
+        "description": "Jugo", "transaction_date": None,
+        "tags": [], "location": None, "notes": None,
     }
     await handlers.handle_parsed_data(update, context, data)
     update.message.reply_text.assert_called_once()
@@ -53,15 +86,15 @@ async def test_handle_parsed_data_asks_date_when_payment_known_and_date_null():
 
 
 @pytest.mark.asyncio
-async def test_handle_parsed_data_shows_confirm_when_payment_and_date_known():
+async def test_handle_parsed_data_shows_confirm_when_required_fields_and_date_known():
     from app import handlers
     handlers.pending_transactions.clear()
     update = make_update(text="gaste 5900 con debito ayer")
     context = MagicMock()
     data = {
-        "type": "expense", "amount": 5900, "currency": "ARS",
-        "category": "food", "merchant": None, "payment_method": "debit card",
-        "transaction_date": "2026-08-10 12:00:00",
+        "type": "Gasto", "amount": 5900, "currency": "ARS",
+        "category": "Comida", "merchant": None, "payment_method": "Tarjeta de Débito",
+        "description": "Jugo", "transaction_date": "2026-08-10 12:00:00",
         "tags": [], "location": None, "notes": None,
     }
     await handlers.handle_parsed_data(update, context, data)
@@ -70,46 +103,140 @@ async def test_handle_parsed_data_shows_confirm_when_payment_and_date_known():
 
 
 @pytest.mark.asyncio
-async def test_callback_sets_payment_method_and_advances_to_pick_date_when_date_null():
+async def test_pick_missing_advances_through_fields_in_order_until_confirm():
     from app import handlers
     handlers.pending_transactions.clear()
     handlers.pending_transactions[123] = {
-        "action": "pick_payment",
-        "data": {
-            "type": "expense", "amount": 5900, "currency": "ARS",
-            "category": "food", "merchant": None, "payment_method": None,
-            "transaction_date": None, "tags": [], "location": None, "notes": None,
-        },
+        "action": "pick_missing",
+        "data": {"transaction_date": "2026-08-10 12:00:00"},
+        "missing_fields": ["type", "amount", "category", "description", "payment_method"],
+        "missing_index": 0,
     }
-    update = make_update(callback_data="pm_cash", chat_id=123)
-    context = MagicMock()
-    await handlers.callback_handler(update, context)
-    state = handlers.pending_transactions.get(123)
-    assert state is not None
-    assert state["action"] == "pick_date"
-    assert state["data"]["payment_method"] == "cash"
-    assert update.callback_query.edit_message_text.call_args[1]["text"] == "¿De qué fecha es la transacción?"
+    answers = [
+        ("gasto", "type", "Gasto"),
+        ("500", "amount", 500),
+        ("comida", "category", "Comida"),
+        ("cena", "description", "Cena"),
+        ("efectivo", "payment_method", "Efectivo"),
+    ]
+    for text, field, expected in answers:
+        update = make_update(text=text, chat_id=123)
+        context = MagicMock()
+        await handlers.message_handler(update, context)
+        state = handlers.pending_transactions[123]
+        assert state["data"][field] == expected
+    assert state["action"] == "confirm"
 
 
 @pytest.mark.asyncio
-async def test_callback_sets_payment_method_and_advances_to_confirm_when_date_present():
+async def test_pick_missing_invalid_answer_reasks_same_question():
     from app import handlers
     handlers.pending_transactions.clear()
     handlers.pending_transactions[123] = {
-        "action": "pick_payment",
-        "data": {
-            "type": "expense", "amount": 5900, "currency": "ARS",
-            "category": "food", "merchant": None, "payment_method": None,
-            "transaction_date": "2026-08-10 12:00:00", "tags": [], "location": None, "notes": None,
-        },
+        "action": "pick_missing",
+        "data": {"transaction_date": "2026-08-10 12:00:00"},
+        "missing_fields": ["amount"],
+        "missing_index": 0,
     }
-    update = make_update(callback_data="pm_cash", chat_id=123)
+    update = make_update(text="no me acuerdo", chat_id=123)
     context = MagicMock()
-    await handlers.callback_handler(update, context)
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_missing"
+    assert state["missing_index"] == 0
+    assert "monto" in update.message.reply_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_message_handler_answers_payment_method_and_advances_to_confirm():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "data": {
+            "type": "Gasto", "amount": 5900, "currency": "ARS",
+            "category": "Comida", "merchant": None, "payment_method": None,
+            "description": "Jugo", "transaction_date": "2026-08-10 12:00:00",
+            "tags": [], "location": None, "notes": None,
+        },
+        "missing_fields": ["payment_method"],
+        "missing_index": 0,
+    }
+    update = make_update(text="con tarjeta de debito", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
     state = handlers.pending_transactions.get(123)
     assert state is not None
     assert state["action"] == "confirm"
-    assert state["data"]["payment_method"] == "cash"
+    assert state["data"]["payment_method"] == "Tarjeta de Débito"
+
+
+@pytest.mark.asyncio
+async def test_handle_parsed_data_enters_pick_split_when_participants_without_split_details():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    update = make_update(text="cena con Viole")
+    context = MagicMock()
+    data = {
+        "type": "Gasto", "amount": 30000, "total_amount": 120000,
+        "currency": "ARS", "category": "Comida", "description": "Cena",
+        "payment_method": "Efectivo", "participants": ["Viole"],
+        "transaction_date": "2026-08-10 12:00:00",
+    }
+    await handlers.handle_parsed_data(update, context, data)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_split"
+    update.message.reply_text.assert_called_once()
+    assert "distribución" in update.message.reply_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+@patch("app.handlers.parse_transaction_from_text")
+async def test_message_handler_split_valid_distribution_confirms(mock_parse):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_split",
+        "data": {
+            "type": "Gasto", "amount": 30000, "total_amount": 120000,
+            "currency": "ARS", "category": "Comida", "description": "Cena",
+            "payment_method": "Efectivo", "participants": ["Viole"],
+            "transaction_date": "2026-08-10 12:00:00",
+        },
+    }
+    mock_parse.return_value = {"split_details": {"user": 30000, "Viole": 90000}}
+    update = make_update(text="Viole 90000 y yo 30000", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions.get(123)
+    assert state is not None
+    assert state["action"] == "confirm"
+    assert state["data"]["split_details"] == {"user": 30000, "Viole": 90000}
+
+
+@pytest.mark.asyncio
+@patch("app.handlers.parse_transaction_from_text")
+async def test_message_handler_split_invalid_sum_repeats_question(mock_parse):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_split",
+        "data": {
+            "type": "Gasto", "amount": 30000, "total_amount": 120000,
+            "currency": "ARS", "category": "Comida", "description": "Cena",
+            "payment_method": "Efectivo", "participants": ["Viole"],
+            "transaction_date": "2026-08-10 12:00:00",
+        },
+    }
+    mock_parse.return_value = {"split_details": {"user": 30000, "Viole": 50000}}
+    update = make_update(text="Viole 50000 y yo 30000", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions.get(123)
+    assert state is not None
+    assert state["action"] == "pick_split"
+    assert "split_details" not in state["data"]
+    assert "no suman" in update.message.reply_text.call_args[0][0].lower()
 
 
 @pytest.mark.asyncio
@@ -119,9 +246,9 @@ async def test_callback_date_today_sets_date_and_advances_to_confirm():
     handlers.pending_transactions[123] = {
         "action": "pick_date",
         "data": {
-            "type": "expense", "amount": 5900, "currency": "ARS",
-            "category": "food", "merchant": None, "payment_method": "cash",
-            "transaction_date": None,
+            "type": "Gasto", "amount": 5900, "currency": "ARS",
+            "category": "Comida", "merchant": None, "payment_method": "Efectivo",
+            "description": "Jugo", "transaction_date": None,
         },
     }
     update = make_update(callback_data="date_today", chat_id=123)
@@ -140,9 +267,9 @@ async def test_callback_date_yesterday_sets_date_and_advances_to_confirm():
     handlers.pending_transactions[123] = {
         "action": "pick_date",
         "data": {
-            "type": "expense", "amount": 5900, "currency": "ARS",
-            "category": "food", "merchant": None, "payment_method": "cash",
-            "transaction_date": None,
+            "type": "Gasto", "amount": 5900, "currency": "ARS",
+            "category": "Comida", "merchant": None, "payment_method": "Efectivo",
+            "description": "Jugo", "transaction_date": None,
         },
     }
     update = make_update(callback_data="date_yesterday", chat_id=123)
@@ -161,9 +288,9 @@ async def test_callback_date_custom_prompts_user_text_input():
     handlers.pending_transactions[123] = {
         "action": "pick_date",
         "data": {
-            "type": "expense", "amount": 5900, "currency": "ARS",
-            "category": "food", "merchant": None, "payment_method": "cash",
-            "transaction_date": None,
+            "type": "Gasto", "amount": 5900, "currency": "ARS",
+            "category": "Comida", "merchant": None, "payment_method": "Efectivo",
+            "description": "Jugo", "transaction_date": None,
         },
     }
     update = make_update(callback_data="date_custom", chat_id=123)
@@ -183,9 +310,9 @@ async def test_message_handler_wait_custom_date_success(mock_parse):
     handlers.pending_transactions[123] = {
         "action": "wait_custom_date",
         "data": {
-            "type": "expense", "amount": 5900, "currency": "ARS",
-            "category": "food", "merchant": None, "payment_method": "cash",
-            "transaction_date": None,
+            "type": "Gasto", "amount": 5900, "currency": "ARS",
+            "category": "Comida", "merchant": None, "payment_method": "Efectivo",
+            "description": "Jugo", "transaction_date": None,
         },
     }
     mock_parse.return_value = "2026-08-08 14:00:00"
@@ -207,9 +334,9 @@ async def test_message_handler_wait_custom_date_failure(mock_parse):
     handlers.pending_transactions[123] = {
         "action": "wait_custom_date",
         "data": {
-            "type": "expense", "amount": 5900, "currency": "ARS",
-            "category": "food", "merchant": None, "payment_method": "cash",
-            "transaction_date": None,
+            "type": "Gasto", "amount": 5900, "currency": "ARS",
+            "category": "Comida", "merchant": None, "payment_method": "Efectivo",
+            "description": "Jugo", "transaction_date": None,
         },
     }
     mock_parse.return_value = None
@@ -223,29 +350,39 @@ async def test_message_handler_wait_custom_date_failure(mock_parse):
     assert "No pude entender la fecha" in update.message.reply_text.call_args[0][0]
 
 
-
 def test_spanish_labels_defined():
-    from app.handlers import CATEGORY_LABELS, PAYMENT_METHOD_LABELS
-    assert CATEGORY_LABELS["food"] == "Comida"
-    assert CATEGORY_LABELS["transport"] == "Transporte"
-    assert PAYMENT_METHOD_LABELS["cash"] == "💵 Efectivo"
-    assert PAYMENT_METHOD_LABELS["debit card"] == "💳 Débito"
+    from app.handlers import PAYMENT_METHOD_LABELS
+    assert PAYMENT_METHOD_LABELS["Efectivo"] == "💵 Efectivo"
+    assert PAYMENT_METHOD_LABELS["Tarjeta de Débito"] == "💳 Débito"
+
+
+def test_confirm_keyboard_includes_add_context():
+    from app.handlers import _get_confirm_keyboard
+    keyboard = _get_confirm_keyboard().to_dict()
+    callbacks = [
+        button["callback_data"]
+        for row in keyboard["inline_keyboard"]
+        for button in row
+    ]
+    assert "confirm" in callbacks
+    assert "cancel" in callbacks
+    assert "add_context" in callbacks
 
 
 def test_build_confirm_text():
     from app.handlers import _build_confirm_text
     data = {
-        "type": "expense",
+        "type": "Gasto",
         "amount": 1500,
         "currency": "ARS",
-        "category": "food",
-        "payment_method": "credit card",
+        "category": "Comida",
+        "payment_method": "Tarjeta de Crédito",
         "transaction_date": "2026-08-10 20:00:00",
         "merchant": "Coto",
     }
     text = _build_confirm_text(data)
     assert "Tipo: Gasto" in text
-    assert "Monto: $1500 ARS" in text
+    assert "Monto personal: $1500 ARS" in text
     assert "Categoría: Comida" in text
     assert "Método de pago: 💳 Crédito" in text
     assert "Fecha: 2026-08-10 20:00" in text
@@ -259,7 +396,7 @@ async def test_summary_handler_uses_spanish_labels(mock_summary, mock_totals):
     from app import handlers
     mock_totals.return_value = {"total_income": 10000.0, "total_expenses": 5000.0}
     mock_summary.return_value = [
-        {"category": "food", "type": "expense", "total": 5000.0}
+        {"category": "Comida", "type": "Gasto", "total": 5000.0}
     ]
     update = make_update(chat_id=123)
     context = MagicMock()
@@ -290,7 +427,7 @@ async def test_recent_handler_uses_spanish_labels(mock_recent):
     from app import handlers
     from datetime import datetime
     mock_recent.return_value = [
-        MockRecord({"type": "expense", "amount": 1200, "category": "transport", "description": None, "transaction_date": None, "created_at": datetime(2026, 8, 10, 15, 30)})
+        MockRecord({"type": "Gasto", "amount": 1200, "category": "Transporte", "description": None, "transaction_date": None, "created_at": datetime(2026, 8, 10, 15, 30)})
     ]
     update = make_update(chat_id=123)
     context = MagicMock()
@@ -307,9 +444,9 @@ async def test_recent_handler_with_asyncpg_record_interface(mock_recent):
     from datetime import datetime
     mock_recent.return_value = [
         MockRecord({
-            "type": "expense",
+            "type": "Gasto",
             "amount": 1200,
-            "category": "transport",
+            "category": "Transporte",
             "description": "subte",
             "transaction_date": datetime(2026, 8, 10, 15, 30),
             "created_at": datetime(2026, 8, 10, 16, 0),
@@ -331,8 +468,8 @@ async def test_callback_confirm_saves_transaction(mock_insert):
     handlers.pending_transactions[123] = {
         "action": "confirm",
         "data": {
-            "type": "expense", "amount": 5900, "currency": "ARS",
-            "category": "food", "merchant": None, "payment_method": "cash",
+            "type": "Gasto", "amount": 5900, "currency": "ARS",
+            "category": "Comida", "merchant": None, "payment_method": "Efectivo",
             "transaction_date": "2026-08-10 12:00:00",
             "tags": [], "location": None, "notes": None,
         },
@@ -347,8 +484,8 @@ async def test_callback_confirm_saves_transaction(mock_insert):
     context = MagicMock()
     await handlers.callback_handler(update, context)
     mock_insert.assert_called_once_with({
-        "type": "expense", "amount": 5900, "currency": "ARS",
-        "category": "food", "merchant": None, "payment_method": "cash",
+        "type": "Gasto", "amount": 5900, "currency": "ARS",
+        "category": "Comida", "merchant": None, "payment_method": "Efectivo",
         "transaction_date": "2026-08-10 12:00:00",
         "tags": [], "location": None, "notes": None,
     })
@@ -364,7 +501,7 @@ async def test_callback_cancel_removes_pending_transaction():
     handlers.pending_transactions.clear()
     handlers.pending_transactions[123] = {
         "action": "confirm",
-        "data": {"type": "expense", "amount": 5900},
+        "data": {"type": "Gasto", "amount": 5900},
     }
     update = make_update(callback_data="cancel", chat_id=123)
     context = MagicMock()
@@ -376,12 +513,30 @@ async def test_callback_cancel_removes_pending_transaction():
 
 
 @pytest.mark.asyncio
+@patch("app.handlers.insert_transaction")
+async def test_callback_add_context_transitions_to_add_context_state(mock_insert):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "confirm",
+        "data": {"type": "Gasto", "amount": 5900},
+    }
+    update = make_update(callback_data="add_context", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions.get(123)
+    assert state is not None
+    assert state["action"] == "add_context"
+    assert state["data"]["amount"] == 5900
+
+
+@pytest.mark.asyncio
 async def test_confirm_message_includes_description():
     from app.handlers import _build_confirm_text
     data = {
-        "type": "expense", "amount": 5900, "currency": "ARS",
-        "category": "food", "description": "jugo", "merchant": None,
-        "payment_method": "cash", "transaction_date": "2026-08-10 12:00:00",
+        "type": "Gasto", "amount": 5900, "currency": "ARS",
+        "category": "Comida", "description": "jugo", "merchant": None,
+        "payment_method": "Efectivo", "transaction_date": "2026-08-10 12:00:00",
         "tags": [], "location": None, "notes": None,
     }
     text = _build_confirm_text(data)
@@ -393,8 +548,8 @@ async def test_confirm_message_includes_description():
 async def test_delete_handler_includes_description(mock_recent):
     from app import handlers
     mock_recent.return_value = [
-        MockRecord({"id": "1", "type": "expense", "amount": 1200, "category": "transport", "description": "colectivo"}),
-        MockRecord({"id": "2", "type": "income", "amount": 5000, "category": "freelance", "description": None}),
+        MockRecord({"id": "1", "type": "Gasto", "amount": 1200, "category": "Transporte", "description": "colectivo"}),
+        MockRecord({"id": "2", "type": "Ingreso", "amount": 5000, "category": "Trabajo Independiente", "description": None}),
     ]
     update = make_update(chat_id=123)
     context = MagicMock()
@@ -402,8 +557,4 @@ async def test_delete_handler_includes_description(mock_recent):
     update.message.reply_text.assert_called_once()
     sent_text = update.message.reply_text.call_args[0][0]
     assert "1. Gasto de $1200 en Transporte — colectivo" in sent_text
-    assert "2. Ingreso de $5000 en Freelance\n" in sent_text
-
-
-
-
+    assert "2. Ingreso de $5000 en Trabajo Independiente\n" in sent_text
