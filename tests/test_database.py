@@ -40,6 +40,30 @@ def test_migrations_harden_against_legacy_rows():
     assert "UPDATE transactions SET type = 'Ingreso'" in migration_sql
     assert "UPDATE transactions SET status = 'Completado'" in migration_sql
     assert "UPDATE transactions SET payment_method = 'Efectivo'" in migration_sql
+    assert "DROP CONSTRAINT IF EXISTS transactions_type_check;" in migration_sql
+    assert "DROP CONSTRAINT IF EXISTS transactions_status_check;" in migration_sql
+    assert "DROP CONSTRAINT IF EXISTS transactions_payment_method_check;" in migration_sql
+
+
+def test_legacy_checks_dropped_before_value_migration():
+    names = [c for c in database.STARTUP_MIGRATIONS if c is database.DROP_LEGACY_CHECKS_SQL]
+    assert names == [database.DROP_LEGACY_CHECKS_SQL]
+    legacy_updates = [
+        c for c in database.STARTUP_MIGRATIONS
+        if c in (
+            database.UPDATE_LEGACY_TYPE_VALUES_SQL,
+            database.UPDATE_LEGACY_STATUS_VALUES_SQL,
+            database.UPDATE_LEGACY_PAYMENT_METHOD_VALUES_SQL,
+        )
+    ]
+    assert len(legacy_updates) == 3
+    drop_idx = database.STARTUP_MIGRATIONS.index(database.DROP_LEGACY_CHECKS_SQL)
+    update_idx = database.STARTUP_MIGRATIONS.index(database.UPDATE_LEGACY_TYPE_VALUES_SQL)
+    assert drop_idx < update_idx
+    for u in legacy_updates:
+        assert database.STARTUP_MIGRATIONS.index(u) > drop_idx
+    for check in (database.ALTER_TYPE_CHECK_SQL, database.ALTER_STATUS_CHECK_SQL, database.ALTER_PAYMENT_METHOD_CHECK_SQL):
+        assert database.STARTUP_MIGRATIONS.index(check) > drop_idx
 
 
 def test_create_table_contains_advanced_transaction_fields():
