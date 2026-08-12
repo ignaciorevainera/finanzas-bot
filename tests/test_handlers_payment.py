@@ -679,3 +679,67 @@ async def test_add_context_unchanged_split_stays_in_confirm(monkeypatch):
     assert state["action"] == "confirm"
     assert state["data"]["split_details"] == {"user": 30000, "Viole": 90000}
     assert state["data"]["location"] == "Palermo"
+
+
+@pytest.mark.asyncio
+async def test_parser_supplied_split_with_bad_sum_reenters_pick_split():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    update = make_update(text="de 120000 yo puse 30000")
+    context = MagicMock()
+    data = {
+        "type": "Gasto", "amount": 30000, "total_amount": 120000,
+        "currency": "ARS", "category": "Comida", "description": "Cena",
+        "payment_method": "Efectivo", "participants": ["Viole"],
+        "split_details": {"user": 30000, "Viole": 50000},
+        "transaction_date": "2026-08-10 12:00:00",
+    }
+    await handlers.handle_parsed_data(update, context, data)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_split"
+    assert "distribución" in update.message.reply_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_parser_supplied_split_with_valid_sum_goes_to_confirm():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    update = make_update(text="de 120000 yo puse 30000")
+    context = MagicMock()
+    data = {
+        "type": "Gasto", "amount": 30000, "total_amount": 120000,
+        "currency": "ARS", "category": "Comida", "description": "Cena",
+        "payment_method": "Efectivo", "participants": ["Viole"],
+        "split_details": {"user": 30000, "Viole": 90000},
+        "transaction_date": "2026-08-10 12:00:00",
+    }
+    await handlers.handle_parsed_data(update, context, data)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+
+
+@pytest.mark.asyncio
+async def test_parser_supplied_split_with_wrong_user_share_reenters_pick_split():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    update = make_update(text="de 120000 yo puse 30000")
+    context = MagicMock()
+    data = {
+        "type": "Gasto", "amount": 30000, "total_amount": 120000,
+        "currency": "ARS", "category": "Comida", "description": "Cena",
+        "payment_method": "Efectivo", "participants": ["Viole"],
+        "split_details": {"user": 20000, "Viole": 100000},
+        "transaction_date": "2026-08-10 12:00:00",
+    }
+    await handlers.handle_parsed_data(update, context, data)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_split"
+    assert "distribución" in update.message.reply_text.call_args[0][0].lower()
+
+
+def test_split_is_valid_requires_known_total_amount():
+    from app.handlers import _split_is_valid
+    assert _split_is_valid(
+        {"amount": 30000},
+        {"user": 30000, "Viole": 90000},
+    ) is False

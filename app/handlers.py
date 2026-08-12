@@ -394,7 +394,7 @@ def _strip_diacritics(value: str) -> str:
 
 def _needs_split_question(data: dict) -> bool:
     if data.get("split_details"):
-        return False
+        return not _split_is_valid(data, data["split_details"])
     if data.get("participants"):
         return True
     amount = data.get("amount")
@@ -415,11 +415,21 @@ def _split_is_valid(data: dict, split_details) -> bool:
         return False
     total_amount = data.get("total_amount")
     if total_amount is None:
-        return True
+        return False
     try:
-        return abs(sum(float(value) for value in split_details.values()) - float(total_amount)) < 1e-6
+        if abs(sum(float(value) for value in split_details.values()) - float(total_amount)) > 1e-6:
+            return False
     except (TypeError, ValueError):
         return False
+    amount = data.get("amount")
+    if amount is None:
+        return True
+    try:
+        if abs(float(split_details["user"]) - float(amount)) > 1e-6:
+            return False
+    except (TypeError, ValueError, KeyError):
+        return False
+    return True
 
 
 def _format_amount(value, currency: str) -> str:
