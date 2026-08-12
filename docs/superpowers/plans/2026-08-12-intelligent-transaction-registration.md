@@ -203,7 +203,7 @@ async def test_insert_transaction_passes_advanced_fields_in_stable_order():
     await database.insert_transaction(data)
     args = mock_pool.fetchrow.call_args.args
     assert args[0] == database.INSERT_SQL
-    assert args[2] == 120000
+    assert args[3] == 120000
     assert args[18] == ["Viole"]
 ```
 
@@ -220,6 +220,8 @@ Add `total_amount DECIMAL(12, 2) NOT NULL`, advanced nullable columns, `particip
 - [ ] **Step 4: Extend insert SQL and normalize date/JSON boundaries**
 
 Add every field to one explicit insert column list, in this parameter order: `type`, `amount`, `total_amount`, `currency`, `category`, `description`, `merchant`, `payment_method`, `status`, `tags`, `location`, `notes`, `transaction_date`, `due_date`, `recurrence`, `installment_number`, `installment_total`, `participants`, `split_details`, `transfer_details`, `package_details`, `related_transaction_id`, `original_message`. Convert ISO strings to timezone-aware `datetime`, pass arrays as Python lists, and pass JSON structures as dictionaries accepted by `asyncpg`. Use `data.get("total_amount", data["amount"])`. Preserve existing `original_message` behavior.
+
+Existing `tests/test_database.py` insert tests assert parameter indices of the old 13-column order (e.g. `args[13]` for `transaction_date`). Update those assertions to the new 23-column order above (`transaction_date` becomes `args[12]`) while keeping the existing test cases' intent.
 
 - [ ] **Step 5: Run focused and full database tests**
 
