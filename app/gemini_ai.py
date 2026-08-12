@@ -51,6 +51,12 @@ def _get_formatted_datetime(current_datetime: datetime | str | None) -> str:
     return str(current_datetime)
 
 
+def capitalize_first_letter(s: str | None) -> str | None:
+    if not s:
+        return s
+    return s[0].upper() + s[1:]
+
+
 async def parse_transaction_from_text(
     text: str, current_datetime: datetime | str | None = None
 ) -> dict | None:
@@ -72,6 +78,8 @@ async def parse_transaction_from_text(
                 extra={"input_text": text, "response_data": data},
             )
             return None
+        if "description" in data:
+            data["description"] = capitalize_first_letter(data["description"])
         data.setdefault("currency", "ARS")
         data.setdefault("tags", [])
         data.setdefault("transaction_date", None)
@@ -113,6 +121,8 @@ async def parse_transaction_from_audio(
                 extra={"mime_type": mime_type, "response_data": data},
             )
             return None
+        if "description" in data:
+            data["description"] = capitalize_first_letter(data["description"])
         data.setdefault("currency", "ARS")
         data.setdefault("tags", [])
         data.setdefault("transaction_date", None)

@@ -53,7 +53,36 @@ async def test_description_extracted_from_text(mock_client):
     from app.gemini_ai import parse_transaction_from_text
     result = await parse_transaction_from_text("gaste 5900 en jugo")
     assert result is not None
-    assert result.get("description") == "jugo"
+    assert result.get("description") == "Jugo"
+
+
+@pytest.mark.asyncio
+async def test_description_capitalization_lowercase(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(
+        return_value=make_response(
+            '{"type":"expense","amount":5900,"currency":"ARS","category":"food",'
+            '"description":"jugo de naranja","merchant":null,"payment_method":null,"tags":[],"location":null,"notes":null}'
+        )
+    )
+    from app.gemini_ai import parse_transaction_from_text
+    result = await parse_transaction_from_text("gaste 5900 en jugo de naranja")
+    assert result is not None
+    assert result.get("description") == "Jugo de naranja"
+
+
+@pytest.mark.asyncio
+async def test_description_capitalization_preserves_internal_uppercase(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(
+        return_value=make_response(
+            '{"type":"expense","amount":5000,"currency":"ARS","category":"other",'
+            '"description":"subscripcion a OpenAI","merchant":null,"payment_method":null,"tags":[],"location":null,"notes":null}'
+        )
+    )
+    from app.gemini_ai import parse_transaction_from_text
+    result = await parse_transaction_from_text("openai 5000")
+    assert result is not None
+    assert result.get("description") == "Subscripcion a OpenAI"
+
 
 
 @pytest.mark.asyncio
