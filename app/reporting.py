@@ -90,8 +90,9 @@ async def run_report(request: ReportRequest) -> dict[str, Any]:
     """Route a report request to exactly one database function.
 
     Every branch returns a dict shaped for ``format_report``:
-    - summary: ``income``, ``expenses``, ``shared_total``, ``net``, plus
-      optional ``currency``, from the first currency group.
+    - summary: ``currency_groups``, a list of per-currency groups each with
+      ``currency``, ``income``, ``expenses``, ``shared_total``, and ``net``.
+      Currencies are never summed together.
     - all other metrics: ``rows`` of dicts with ``label`` plus the metric
       amount field (``total`` for dimensions, ``amount`` for advanced) and
       optional per-row ``currency``.
@@ -103,9 +104,7 @@ async def run_report(request: ReportRequest) -> dict[str, Any]:
     """
     if request.metric == "summary":
         rows = await get_report_summary(request.start, request.end)
-        if not rows:
-            return {"income": 0, "expenses": 0, "shared_total": 0, "net": 0}
-        return dict(rows[0])
+        return {"currency_groups": [dict(row) for row in rows]}
     if request.metric in _DIMENSION_DB_METRICS:
         rows = await get_report_by_dimension(
             request.metric, request.start, request.end, request.value
@@ -131,7 +130,8 @@ def format_report(request: ReportRequest, result: dict[str, Any]) -> str:
     """Format a report result as a Spanish multi-line string.
 
     Stable result keys per metric:
-    - summary: ``income``, ``expenses``, ``shared_total``, ``net`` (plus optional ``currency``).
+    - summary: ``currency_groups`` with ``currency``, ``income``, ``expenses``,
+      ``shared_total``, and ``net`` per group.
     - dimension and advanced metrics: ``rows`` with ``label`` plus the metric
       amount field (``total`` for dimensions, ``amount`` for advanced) and
       optional per-row ``currency``.
@@ -141,7 +141,7 @@ def format_report(request: ReportRequest, result: dict[str, Any]) -> str:
     label = METRIC_LABELS[metric]
     currency = result.get("currency")
     if metric == "summary":
-        return _format_summary(result, currency)
+        return _format_summary(result)
     rows = result.get("rows") or []
     lines = [f"*{label}*"]
     if not rows:
@@ -152,15 +152,21 @@ def format_report(request: ReportRequest, result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_summary(result: dict[str, Any], currency: str | None) -> str:
+def _format_summary(result: dict[str, Any]) -> str:
     lines = ["*Resumen*"]
-    for key, label in (
-        ("income", "Ingresos personales"),
-        ("expenses", "Gastos personales"),
-        ("shared_total", "Total compartido"),
-        ("net", "Flujo neto"),
-    ):
-        lines.append(f"{label}: {_format_amount(result.get(key, 0), currency)}")
+    groups = result.get("currency_groups") or []
+    if not groups:
+        lines.append("No hay transacciones.")
+        return "\n".join(lines)
+    for group in groups:
+        currency = group.get("currency")
+        for key, label in (
+            ("income", "Ingresos personales"),
+            ("expenses", "Gastos personales"),
+            ("shared_total", "Gasto total compartido"),
+            ("net", "Flujo neto"),
+        ):
+            lines.append(f"{label}: {_format_amount(group.get(key, 0), currency)}")
     return "\n".join(lines)
 
 

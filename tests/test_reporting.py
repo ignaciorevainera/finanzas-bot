@@ -79,23 +79,54 @@ def test_report_request_rejects_inverted_period():
 def test_format_summary_uses_personal_amount_and_shows_shared_total():
     text = format_report(
         _request("summary"),
-        {"income": 150000, "expenses": 30000, "shared_total": 120000, "net": 120000},
+        {
+            "currency_groups": [
+                {"currency": "ARS", "income": 150000, "expenses": 30000, "shared_total": 120000, "net": 120000}
+            ]
+        },
     )
 
     assert "Ingresos personales" in text
     assert "Gastos personales" in text
-    assert "Total compartido" in text
+    assert "Gasto total compartido" in text
     assert "Flujo neto" in text
 
 
 def test_format_summary_uses_stored_currency_when_provided():
     text = format_report(
         _request("summary"),
-        {"currency": "USD", "income": 1000, "expenses": 300, "shared_total": 0, "net": 700},
+        {"currency_groups": [{"currency": "USD", "income": 1000, "expenses": 300, "shared_total": 0, "net": 700}]},
     )
 
     assert "USD" in text
     assert "ARS" not in text
+
+
+def test_format_summary_renders_every_currency_group():
+    text = format_report(
+        _request("summary"),
+        {
+            "currency_groups": [
+                {"currency": "ARS", "income": 150000, "expenses": 30000, "shared_total": 120000, "net": 120000},
+                {"currency": "USD", "income": 1000, "expenses": 300, "shared_total": 500, "net": 700},
+            ]
+        },
+    )
+
+    assert "150000 ARS" in text
+    assert "120000 ARS" in text
+    assert "1000 USD" in text
+    assert "500 USD" in text
+    assert "700 USD" in text
+
+
+def test_format_summary_shared_total_is_full_shared_cost():
+    text = format_report(
+        _request("summary"),
+        {"currency_groups": [{"currency": "ARS", "income": 150000, "expenses": 30000, "shared_total": 90000, "net": 120000}]},
+    )
+
+    assert "Gasto total compartido: 90000 ARS" in text
 
 
 def test_format_report_has_specific_labels_for_advanced_metrics():
@@ -227,7 +258,7 @@ async def test_run_report_dispatches_every_metric_to_its_db_function(
         raw = [
             {"income": 100, "expenses": 40, "shared_total": 10, "net": 60, "currency": "ARS"}
         ]
-        expected = raw[0]
+        expected = {"currency_groups": raw}
     else:
         raw = [{"label": "x", "total": 1, "currency": "ARS"}]
         expected = {"rows": raw}
@@ -245,13 +276,29 @@ async def test_run_report_dispatches_every_metric_to_its_db_function(
 
 
 @pytest.mark.asyncio
-async def test_run_report_summary_empty_returns_zeroed_dict(monkeypatch):
+async def test_run_report_summary_empty_returns_no_currency_groups(monkeypatch):
     mocked = AsyncMock(return_value=[])
     monkeypatch.setattr("app.reporting.get_report_summary", mocked)
 
     result = await run_report(_request("summary"))
 
-    assert result == {"income": 0, "expenses": 0, "shared_total": 0, "net": 0}
+    assert result == {"currency_groups": []}
+
+
+@pytest.mark.asyncio
+async def test_run_report_summary_returns_every_currency_group(monkeypatch):
+    raw = [
+        {"currency": "ARS", "income": 100, "expenses": 40, "shared_total": 10, "net": 60},
+        {"currency": "USD", "income": 10, "expenses": 4, "shared_total": 3, "net": 6},
+    ]
+    mocked = AsyncMock(return_value=raw)
+    monkeypatch.setattr("app.reporting.get_report_summary", mocked)
+    request = _request("summary")
+
+    result = await run_report(request)
+
+    assert result == {"currency_groups": raw}
+    mocked.assert_awaited_once_with(request.start, request.end)
 
 
 @pytest.mark.asyncio

@@ -272,6 +272,7 @@ async def test_get_report_summary_uses_personal_amounts_and_currency_groups():
 
     sql, *params = mock_pool.fetch.call_args.args
     assert "SUM(amount)" in sql
+    assert "SUM(total_amount) FILTER (WHERE amount < total_amount)" in sql
     assert "AS income" in sql
     assert "AS expenses" in sql
     assert "AS shared_total" in sql

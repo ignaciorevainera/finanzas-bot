@@ -74,7 +74,7 @@ Financial reports aggregate stored transactions over a period. Both `/summary` a
 
 ### Commands
 
-- `/summary` — summary for the current month: personal income, personal expenses, shared total, and net flow.
+- `/summary` — summary for the current month, grouped by currency: personal income, personal expenses, full shared cost, and net flow.
 - `/report <métrica> [valor]` — dimension or advanced report for the current month.
 
 Examples:
@@ -104,7 +104,7 @@ Report periods are half-open `[start, end)`: `start` is inclusive, `end` is excl
 
 ### Personal-share semantics
 
-Personal reports aggregate `amount` (the user's personal share). Shared reports expose both `amount` and `total_amount` per row. `person` reports drop the reserved `user` pseudo-participant (the personal share, already shown as `amount`).
+Personal reports aggregate `amount` (the user's personal share). Shared reports expose both `amount` and `total_amount` per row. In the summary, "Gasto total compartido" is the full cost (`total_amount`) of shared movements, additive-orthogonal to personal expenses. `person` reports drop the reserved `user` pseudo-participant (the personal share, already shown as `amount`). Summary figures are computed per currency — ARS and USD are never added together.
 
 ## Database Schema (PostgreSQL 18)
 

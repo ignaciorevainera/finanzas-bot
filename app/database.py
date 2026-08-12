@@ -290,7 +290,7 @@ REPORT_SUMMARY_SQL = """
 SELECT
     COALESCE(SUM(amount) FILTER (WHERE type = 'Ingreso'), 0) AS income,
     COALESCE(SUM(amount) FILTER (WHERE type = 'Gasto'), 0) AS expenses,
-    COALESCE(SUM(amount) FILTER (WHERE amount < total_amount), 0) AS shared_total,
+    COALESCE(SUM(total_amount) FILTER (WHERE amount < total_amount), 0) AS shared_total,
     COALESCE(SUM(amount) FILTER (WHERE type = 'Ingreso'), 0)
         - COALESCE(SUM(amount) FILTER (WHERE type = 'Gasto'), 0) AS net,
     currency
