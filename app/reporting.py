@@ -1,14 +1,27 @@
-"""Report request contract and pure Spanish report formatting.
+"""Report request contract, pure Spanish formatting, and request routing.
 
-Defines the validated ``ReportRequest`` value object and ``format_report``,
-a deterministic string formatter with stable keys per metric. The module is
-deliberately free of database and AI imports: ``run_report`` and
-``parse_report_request`` arrive in later tasks.
+Defines the validated ``ReportRequest`` value object, ``format_report``
+(a deterministic string formatter with stable keys per metric), and
+``run_report``, which routes each metric to exactly one database function.
+``parse_report_request`` arrives in a later task.
 """
 
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
+
+from app.database import (
+    get_report_by_dimension,
+    get_report_due_dates,
+    get_report_installments,
+    get_report_packages,
+    get_report_person,
+    get_report_recurrence,
+    get_report_refunds,
+    get_report_shared,
+    get_report_summary,
+    get_report_transfers,
+)
 
 ReportMetric = Literal[
     "summary", "category", "merchant", "payment_method", "location",
@@ -37,6 +50,20 @@ DIMENSION_METRICS = frozenset({
     "category", "merchant", "payment_method", "location", "person", "tag",
 })
 
+PERIOD_ONLY_REPORTS: dict[str, str] = {
+    "installments": "get_report_installments",
+    "recurrence": "get_report_recurrence",
+    "due_dates": "get_report_due_dates",
+    "transfers": "get_report_transfers",
+    "refunds": "get_report_refunds",
+    "packages": "get_report_packages",
+    "shared": "get_report_shared",
+}
+
+_DIMENSION_DB_METRICS = frozenset({
+    "category", "merchant", "payment_method", "location", "tag",
+})
+
 
 @dataclass(frozen=True)
 class ReportRequest:
@@ -57,6 +84,29 @@ class ReportRequest:
             raise ValueError("start y end deben ser timezone-aware")
         if self.end <= self.start:
             raise ValueError("end debe ser posterior a start")
+
+
+async def run_report(request: ReportRequest) -> dict[str, Any]:
+    """Route a report request to exactly one database function.
+
+    Period and optional filter pass through unchanged. Dimension metrics
+    forward ``value``; the person report drops the reserved ``"user"``
+    pseudo-participant (the personal share, already shown as ``amount``).
+    Metrics without a dispatch branch raise ``ValueError``.
+    """
+    if request.metric == "summary":
+        return await get_report_summary(request.start, request.end)
+    if request.metric in _DIMENSION_DB_METRICS:
+        return await get_report_by_dimension(
+            request.metric, request.start, request.end, request.value
+        )
+    if request.metric == "person":
+        rows = await get_report_person(request.start, request.end)
+        return [row for row in rows if row.get("label") != "user"]
+    func_name = PERIOD_ONLY_REPORTS.get(request.metric)
+    if func_name is None:
+        raise ValueError(f"Unsupported report metric: {request.metric}")
+    return await globals()[func_name](request.start, request.end)
 
 
 def format_report(request: ReportRequest, result: dict[str, Any]) -> str:

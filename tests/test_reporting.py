@@ -1,9 +1,10 @@
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 
-from app.reporting import ReportRequest, format_report
+from app.reporting import ReportRequest, format_report, run_report
 
 
 def _request(metric: str, value: str | None = None) -> ReportRequest:
@@ -162,3 +163,120 @@ def test_format_shared_rows_show_personal_and_total_amounts():
     assert "Cena con amigos" in text
     assert "5000" in text
     assert "15000" in text
+
+
+def test_empty_report_explains_no_transactions():
+    request = ReportRequest(
+        "merchant",
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    assert "No hay transacciones" in format_report(request, {"rows": []})
+
+
+@pytest.mark.asyncio
+async def test_run_report_dispatches_category_request(monkeypatch):
+    expected = {"rows": [{"label": "Comida", "total": 30000}]}
+    mocked = AsyncMock(return_value=expected)
+    monkeypatch.setattr("app.reporting.get_report_by_dimension", mocked)
+    request = ReportRequest(
+        "category",
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+
+    result = await run_report(request)
+
+    assert result == expected
+    mocked.assert_awaited_once_with("category", request.start, request.end, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metric", "db_func", "period_only"),
+    [
+        ("summary", "get_report_summary", True),
+        ("category", "get_report_by_dimension", False),
+        ("merchant", "get_report_by_dimension", False),
+        ("payment_method", "get_report_by_dimension", False),
+        ("location", "get_report_by_dimension", False),
+        ("tag", "get_report_by_dimension", False),
+        ("installments", "get_report_installments", True),
+        ("recurrence", "get_report_recurrence", True),
+        ("due_dates", "get_report_due_dates", True),
+        ("transfers", "get_report_transfers", True),
+        ("refunds", "get_report_refunds", True),
+        ("packages", "get_report_packages", True),
+        ("shared", "get_report_shared", True),
+    ],
+)
+async def test_run_report_dispatches_every_metric_to_its_db_function(
+    monkeypatch, metric, db_func, period_only
+):
+    expected = {"rows": [{"label": "x", "total": 1}]}
+    mocked = AsyncMock(return_value=expected)
+    monkeypatch.setattr(f"app.reporting.{db_func}", mocked)
+    request = _request(metric)
+
+    result = await run_report(request)
+
+    assert result == expected
+    if period_only:
+        mocked.assert_awaited_once_with(request.start, request.end)
+    else:
+        mocked.assert_awaited_once_with(metric, request.start, request.end, None)
+
+
+@pytest.mark.asyncio
+async def test_run_report_passes_dimension_filter_value_through(monkeypatch):
+    mocked = AsyncMock(return_value={"rows": []})
+    monkeypatch.setattr("app.reporting.get_report_by_dimension", mocked)
+    request = _request("tag", value="Sueldo")
+
+    await run_report(request)
+
+    mocked.assert_awaited_once_with("tag", request.start, request.end, "Sueldo")
+
+
+@pytest.mark.asyncio
+async def test_run_report_person_filters_reserved_user_row(monkeypatch):
+    mocked = AsyncMock(
+        return_value=[
+            {"label": "user", "total": 5000, "currency": "ARS"},
+            {"label": "María", "total": 3000, "currency": "ARS"},
+            {"label": "user", "total": 2000, "currency": "USD"},
+        ]
+    )
+    monkeypatch.setattr("app.reporting.get_report_person", mocked)
+    request = _request("person")
+
+    result = await run_report(request)
+
+    assert result == [{"label": "María", "total": 3000, "currency": "ARS"}]
+    mocked.assert_awaited_once_with(request.start, request.end)
+
+
+@pytest.mark.asyncio
+async def test_run_report_person_returns_empty_when_only_user_rows(monkeypatch):
+    mocked = AsyncMock(return_value=[{"label": "user", "total": 5000, "currency": "ARS"}])
+    monkeypatch.setattr("app.reporting.get_report_person", mocked)
+
+    result = await run_report(_request("person"))
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_run_report_raises_value_error_for_unroutable_metric(monkeypatch):
+    mock_summary = AsyncMock(return_value={"income": 0})
+    monkeypatch.setattr("app.reporting.get_report_summary", mock_summary)
+    request = ReportRequest(
+        "bogus",
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(ValueError):
+        await run_report(request)
+
+    mock_summary.assert_not_awaited()
