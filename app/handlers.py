@@ -9,8 +9,6 @@ from telegram.ext import ContextTypes
 
 from app.config import settings
 from app.database import (
-    get_monthly_totals,
-    get_monthly_summary,
     get_recent_transactions,
     get_all_transactions,
     insert_transaction,
@@ -20,7 +18,9 @@ from app.gemini_ai import (
     parse_transaction_from_text,
     parse_transaction_from_audio,
     parse_date_from_text,
+    parse_report_request,
 )
+from app.reporting import ReportRequest, run_report, format_report
 from app.transaction_schema import (
     PAYMENT_METHOD_MAP,
     get_missing_transaction_fields,
@@ -57,6 +57,76 @@ SPLIT_INVALID_PROMPT = (
 logger = logging.getLogger(__name__)
 
 pending_transactions = {}
+
+REPORT_METRIC_ALIASES: dict[str, str] = {
+    "resumen": "summary",
+    "summary": "summary",
+    "categoria": "category",
+    "categorias": "category",
+    "category": "category",
+    "comercio": "merchant",
+    "comercios": "merchant",
+    "merchant": "merchant",
+    "medio": "payment_method",
+    "medios": "payment_method",
+    "pago": "payment_method",
+    "pagos": "payment_method",
+    "payment_method": "payment_method",
+    "ubicacion": "location",
+    "ubicaciones": "location",
+    "location": "location",
+    "persona": "person",
+    "personas": "person",
+    "person": "person",
+    "etiqueta": "tag",
+    "etiquetas": "tag",
+    "tag": "tag",
+    "tags": "tag",
+    "cuota": "installments",
+    "cuotas": "installments",
+    "installments": "installments",
+    "recurrencia": "recurrence",
+    "recurrentes": "recurrence",
+    "recurrence": "recurrence",
+    "vencimiento": "due_dates",
+    "vencimientos": "due_dates",
+    "due_dates": "due_dates",
+    "transferencia": "transfers",
+    "transferencias": "transfers",
+    "transfers": "transfers",
+    "reembolso": "refunds",
+    "reembolsos": "refunds",
+    "refunds": "refunds",
+    "paquete": "packages",
+    "paquetes": "packages",
+    "packages": "packages",
+    "compartido": "shared",
+    "compartidos": "shared",
+    "shared": "shared",
+}
+
+REPORT_VALUE_METRICS = frozenset({
+    "category", "merchant", "payment_method", "location", "person", "tag",
+})
+
+REPORT_USAGE_TEXT = (
+    "Uso: /report <métrica> [valor]\n"
+    "Ejemplos:\n"
+    "/report category Comida\n"
+    "/report shared\n"
+    "/report tag Trabajo\n\n"
+    "Métricas: summary, category, merchant, payment_method, location, person, "
+    "tag, installments, recurrence, due_dates, transfers, refunds, packages, shared."
+)
+
+REPORT_UNSUPPORTED_TEXT = (
+    "No pude generar ese reporte. Revisa los comandos disponibles con /help "
+    "o reformula tu pregunta."
+)
+
+REPORT_ERROR_TEXT = (
+    "Ocurrió un error al generar el reporte. Intenta de nuevo en unos minutos."
+)
 
 
 def _get_date_keyboard() -> InlineKeyboardMarkup:
@@ -121,18 +191,68 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def summary_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_access(update):
         return
-    totals = await get_monthly_totals()
-    summary = await get_monthly_summary()
-    
-    if not totals:
-        await update.message.reply_text("No hay datos para este mes.")
-        return
+    start, end = _current_month_period()
+    await send_report(update, ReportRequest("summary", start, end))
 
-    msg = f"Resumen del mes:\nIngresos: ${totals['total_income']:.2f}\nGastos: ${totals['total_expenses']:.2f}\n\nDesglose:\n"
-    for row in summary:
-        msg += f"- {row['category']} ({row['type']}): ${row['total']:.2f}\n"
-    
-    await update.message.reply_text(msg)
+
+async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not check_access(update):
+        return
+    parsed = _parse_report_command(update.message.text)
+    if parsed is None:
+        await update.message.reply_text(REPORT_USAGE_TEXT)
+        return
+    metric, value = parsed
+    start, end = _current_month_period()
+    await send_report(update, ReportRequest(metric, start, end, value=value))
+
+
+def _current_month_period() -> tuple[datetime, datetime]:
+    now = datetime.now().astimezone()
+    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if start.month == 12:
+        next_start = start.replace(year=start.year + 1, month=1)
+    else:
+        next_start = start.replace(month=start.month + 1)
+    return start, next_start
+
+
+def _parse_report_command(text: str | None) -> tuple[str, str | None] | None:
+    if not text:
+        return None
+    parts = text.split(maxsplit=2)
+    if len(parts) < 2:
+        return None
+    metric = REPORT_METRIC_ALIASES.get(parts[1].lower())
+    if metric is None:
+        return None
+    if metric in REPORT_VALUE_METRICS:
+        value = parts[2].strip() if len(parts) == 3 else None
+        if value == "":
+            value = None
+        return metric, value
+    if len(parts) > 2:
+        return None
+    return metric, None
+
+
+async def send_report(update: Update, request: ReportRequest) -> None:
+    try:
+        result = await run_report(request)
+        text = format_report(request, result)
+    except ValueError as exc:
+        logger.warning("Unsupported report request: %s", exc)
+        await update.message.reply_text(REPORT_UNSUPPORTED_TEXT)
+        return
+    except Exception:
+        logger.exception("Unexpected error generating report")
+        await update.message.reply_text(REPORT_ERROR_TEXT)
+        return
+    await update.message.reply_text(text)
+
+
+def _is_report_question(text: str | None) -> bool:
+    return bool(text) and ("?" in text or "¿" in text)
 
 
 async def recent_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -291,7 +411,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending_transactions[chat_id] = {"action": "confirm", "data": merged}
         await _send_confirm_message(update, merged)
         return
-    
+
+    if not state and _is_report_question(text):
+        request = await parse_report_request(text)
+        if request is not None:
+            await send_report(update, request)
+            return
+        await update.message.reply_text(REPORT_UNSUPPORTED_TEXT)
+        return
+
     await update.message.chat.send_action(action="typing")
     data = await parse_transaction_from_text(text)
     await handle_parsed_data(update, context, data)

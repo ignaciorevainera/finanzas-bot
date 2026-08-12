@@ -390,20 +390,16 @@ def test_build_confirm_text():
 
 
 @pytest.mark.asyncio
-@patch("app.handlers.get_monthly_totals")
-@patch("app.handlers.get_monthly_summary")
-async def test_summary_handler_uses_spanish_labels(mock_summary, mock_totals):
+async def test_summary_handler_routes_through_send_report(monkeypatch):
     from app import handlers
-    mock_totals.return_value = {"total_income": 10000.0, "total_expenses": 5000.0}
-    mock_summary.return_value = [
-        {"category": "Comida", "type": "Gasto", "total": 5000.0}
-    ]
+    send_report = AsyncMock()
+    monkeypatch.setattr("app.handlers.send_report", send_report)
     update = make_update(chat_id=123)
     context = MagicMock()
     await handlers.summary_handler(update, context)
-    update.message.reply_text.assert_called_once()
-    sent_text = update.message.reply_text.call_args[0][0]
-    assert "Comida (Gasto): $5000.00" in sent_text
+    send_report.assert_awaited_once()
+    request = send_report.await_args.args[1]
+    assert request.metric == "summary"
 
 
 class MockRecord:

@@ -17,6 +17,7 @@ from app.handlers import (
     start_handler,
     help_handler,
     summary_handler,
+    report_handler,
     recent_handler,
     delete_handler,
     export_handler,
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(CommandHandler("help", help_handler))
     application.add_handler(CommandHandler("summary", summary_handler))
+    application.add_handler(CommandHandler("report", report_handler))
     application.add_handler(CommandHandler("recent", recent_handler))
     application.add_handler(CommandHandler("delete", delete_handler))
     application.add_handler(CommandHandler("export", export_handler))

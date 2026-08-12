@@ -176,8 +176,9 @@ def test_empty_report_explains_no_transactions():
 
 @pytest.mark.asyncio
 async def test_run_report_dispatches_category_request(monkeypatch):
-    expected = {"rows": [{"label": "Comida", "total": 30000}]}
-    mocked = AsyncMock(return_value=expected)
+    raw = [{"label": "Comida", "total": 30000, "currency": "ARS"}]
+    expected = {"rows": raw}
+    mocked = AsyncMock(return_value=raw)
     monkeypatch.setattr("app.reporting.get_report_by_dimension", mocked)
     request = ReportRequest(
         "category",
@@ -213,8 +214,15 @@ async def test_run_report_dispatches_category_request(monkeypatch):
 async def test_run_report_dispatches_every_metric_to_its_db_function(
     monkeypatch, metric, db_func, period_only
 ):
-    expected = {"rows": [{"label": "x", "total": 1}]}
-    mocked = AsyncMock(return_value=expected)
+    if metric == "summary":
+        raw = [
+            {"income": 100, "expenses": 40, "shared_total": 10, "net": 60, "currency": "ARS"}
+        ]
+        expected = raw[0]
+    else:
+        raw = [{"label": "x", "total": 1, "currency": "ARS"}]
+        expected = {"rows": raw}
+    mocked = AsyncMock(return_value=raw)
     monkeypatch.setattr(f"app.reporting.{db_func}", mocked)
     request = _request(metric)
 
@@ -228,13 +236,24 @@ async def test_run_report_dispatches_every_metric_to_its_db_function(
 
 
 @pytest.mark.asyncio
+async def test_run_report_summary_empty_returns_zeroed_dict(monkeypatch):
+    mocked = AsyncMock(return_value=[])
+    monkeypatch.setattr("app.reporting.get_report_summary", mocked)
+
+    result = await run_report(_request("summary"))
+
+    assert result == {"income": 0, "expenses": 0, "shared_total": 0, "net": 0}
+
+
+@pytest.mark.asyncio
 async def test_run_report_passes_dimension_filter_value_through(monkeypatch):
-    mocked = AsyncMock(return_value={"rows": []})
+    mocked = AsyncMock(return_value=[])
     monkeypatch.setattr("app.reporting.get_report_by_dimension", mocked)
     request = _request("tag", value="Sueldo")
 
-    await run_report(request)
+    result = await run_report(request)
 
+    assert result == {"rows": []}
     mocked.assert_awaited_once_with("tag", request.start, request.end, "Sueldo")
 
 
@@ -252,7 +271,7 @@ async def test_run_report_person_filters_reserved_user_row(monkeypatch):
 
     result = await run_report(request)
 
-    assert result == [{"label": "María", "total": 3000, "currency": "ARS"}]
+    assert result == {"rows": [{"label": "María", "total": 3000, "currency": "ARS"}]}
     mocked.assert_awaited_once_with(request.start, request.end)
 
 
@@ -263,7 +282,7 @@ async def test_run_report_person_returns_empty_when_only_user_rows(monkeypatch):
 
     result = await run_report(_request("person"))
 
-    assert result == []
+    assert result == {"rows": []}
 
 
 @pytest.mark.asyncio
@@ -280,7 +299,7 @@ async def test_run_report_person_value_filter_keeps_only_matching_person(monkeyp
 
     result = await run_report(request)
 
-    assert result == [{"label": "José", "total": 4000, "currency": "ARS"}]
+    assert result == {"rows": [{"label": "José", "total": 4000, "currency": "ARS"}]}
     mocked.assert_awaited_once_with(request.start, request.end)
 
 
@@ -296,7 +315,7 @@ async def test_run_report_person_value_filter_returns_empty_when_no_match(monkey
 
     result = await run_report(_request("person", value="Nadie"))
 
-    assert result == []
+    assert result == {"rows": []}
 
 
 @pytest.mark.asyncio

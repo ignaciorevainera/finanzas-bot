@@ -89,27 +89,42 @@ class ReportRequest:
 async def run_report(request: ReportRequest) -> dict[str, Any]:
     """Route a report request to exactly one database function.
 
-    Period and optional filter pass through unchanged. Dimension metrics
-    forward ``value``; the person report filters to ``value`` when set and
-    drops the reserved ``"user"`` pseudo-participant (the personal share,
-    already shown as ``amount``). Metrics without a dispatch branch raise
-    ``ValueError``.
+    Every branch returns a dict shaped for ``format_report``:
+    - summary: ``income``, ``expenses``, ``shared_total``, ``net``, plus
+      optional ``currency``, from the first currency group.
+    - all other metrics: ``rows`` of dicts with ``label`` plus the metric
+      amount field (``total`` for dimensions, ``amount`` for advanced) and
+      optional per-row ``currency``.
+
+    Dimension metrics forward ``value``; the person report filters to
+    ``value`` when set and drops the reserved ``"user"`` pseudo-participant
+    (the personal share, already shown as ``amount``). Metrics without a
+    dispatch branch raise ``ValueError``.
     """
     if request.metric == "summary":
-        return await get_report_summary(request.start, request.end)
+        rows = await get_report_summary(request.start, request.end)
+        if not rows:
+            return {"income": 0, "expenses": 0, "shared_total": 0, "net": 0}
+        return dict(rows[0])
     if request.metric in _DIMENSION_DB_METRICS:
-        return await get_report_by_dimension(
+        rows = await get_report_by_dimension(
             request.metric, request.start, request.end, request.value
         )
+        return _rows_result(rows)
     if request.metric == "person":
         rows = await get_report_person(request.start, request.end)
         if request.value is not None:
             rows = [row for row in rows if row.get("label") == request.value]
-        return [row for row in rows if row.get("label") != "user"]
+        rows = [row for row in rows if row.get("label") != "user"]
+        return _rows_result(rows)
     func_name = PERIOD_ONLY_REPORTS.get(request.metric)
     if func_name is None:
         raise ValueError(f"Unsupported report metric: {request.metric}")
-    return await globals()[func_name](request.start, request.end)
+    return _rows_result(await globals()[func_name](request.start, request.end))
+
+
+def _rows_result(rows) -> dict[str, Any]:
+    return {"rows": [dict(row) for row in rows]}
 
 
 def format_report(request: ReportRequest, result: dict[str, Any]) -> str:
