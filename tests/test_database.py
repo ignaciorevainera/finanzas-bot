@@ -226,3 +226,395 @@ def test_queries_filter_on_spanish_status_and_type():
         assert spanish_value in monthly_sql
     for english_literal in ("'completed'", "'income'", "'expense'"):
         assert english_literal not in monthly_sql
+
+
+@pytest.mark.asyncio
+async def test_get_report_by_dimension_uses_amount_and_date_range():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_by_dimension("category", start, end, None)
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "SUM(amount)" in sql
+    assert "transaction_date >= $1" in sql
+    assert params == [start, end]
+
+
+@pytest.mark.asyncio
+async def test_get_report_shared_returns_personal_and_total_amounts():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    await database.get_report_shared(
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+
+    sql = mock_pool.fetch.call_args.args[0]
+    assert "SUM(amount)" in sql
+    assert "SUM(total_amount)" in sql
+    assert "amount < total_amount" in sql
+
+
+@pytest.mark.asyncio
+async def test_get_report_summary_uses_personal_amounts_and_currency_groups():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_summary(start, end)
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "SUM(amount)" in sql
+    assert "AS income" in sql
+    assert "AS expenses" in sql
+    assert "AS shared_total" in sql
+    assert "AS net" in sql
+    assert "status <> 'Cancelado'" in sql
+    assert "transaction_date >= $1" in sql
+    assert "transaction_date < $2" in sql
+    assert "GROUP BY currency" in sql
+    assert params == [start, end]
+
+
+@pytest.mark.asyncio
+async def test_get_report_by_dimension_covers_every_allowlisted_dimension():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    for dimension in ("category", "merchant", "payment_method", "location", "tag"):
+        mock_pool.fetch.reset_mock()
+        await database.get_report_by_dimension(dimension, start, end, None)
+        sql, *params = mock_pool.fetch.call_args.args
+        assert "SUM(amount)" in sql
+        assert "AS total" in sql
+        assert "status <> 'Cancelado'" in sql
+        assert "transaction_date >= $1" in sql
+        assert "transaction_date < $2" in sql
+        assert "total_amount" not in sql
+        assert params == [start, end]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_by_dimension_tag_groups_by_unnested_tags():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+
+    await database.get_report_by_dimension(
+        "tag",
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+        None,
+    )
+
+    sql = mock_pool.fetch.call_args.args[0]
+    assert "unnest(tags)" in sql
+    assert "AS label" in sql
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_by_dimension_category_binds_value_filter():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_by_dimension("category", start, end, "Comida")
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "category = $3" in sql
+    assert params == [start, end, "Comida"]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_by_dimension_merchant_binds_value_filter():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_by_dimension("merchant", start, end, "Restaurante")
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "merchant = $3" in sql
+    assert params == [start, end, "Restaurante"]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_by_dimension_payment_method_binds_value_filter():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_by_dimension("payment_method", start, end, "Tarjeta de Crédito")
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "payment_method = $3" in sql
+    assert params == [start, end, "Tarjeta de Crédito"]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_by_dimension_location_binds_value_filter():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_by_dimension("location", start, end, "Centro")
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "location = $3" in sql
+    assert params == [start, end, "Centro"]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_by_dimension_tag_binds_array_filter():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_by_dimension("tag", start, end, "Familia")
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "$3 = ANY(tags)" in sql
+    assert params == [start, end, "Familia"]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_by_dimension_rejects_unknown_dimension():
+    with pytest.raises(ValueError):
+        await database.get_report_by_dimension(
+            "not-a-dimension",
+            datetime(2026, 8, 1, tzinfo=timezone.utc),
+            datetime(2026, 9, 1, tzinfo=timezone.utc),
+            None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_report_installments_filters_installment_rows():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_installments(start, end)
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "installment_number" in sql
+    assert "installment_total" in sql
+    assert "SUM(amount) AS amount" in sql
+    assert "status <> 'Cancelado'" in sql
+    assert "transaction_date >= $1" in sql
+    assert "transaction_date < $2" in sql
+    assert params == [start, end]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_recurrence_filters_recurring_rows():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_recurrence(start, end)
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "recurrence" in sql
+    assert "SUM(amount) AS amount" in sql
+    assert "status <> 'Cancelado'" in sql
+    assert "transaction_date >= $1" in sql
+    assert "transaction_date < $2" in sql
+    assert params == [start, end]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_due_dates_filters_rows_with_due_date():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_due_dates(start, end)
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "due_date" in sql
+    assert "SUM(amount) AS amount" in sql
+    assert "status <> 'Cancelado'" in sql
+    assert "transaction_date >= $1" in sql
+    assert "transaction_date < $2" in sql
+    assert params == [start, end]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_transfers_uses_jsonb_operator():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_transfers(start, end)
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "transfer_details->>" in sql
+    assert "transfer_details IS NOT NULL" in sql
+    assert "SUM(amount) AS amount" in sql
+    assert "status <> 'Cancelado'" in sql
+    assert "transaction_date >= $1" in sql
+    assert "transaction_date < $2" in sql
+    assert params == [start, end]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_refunds_filters_related_transactions():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_refunds(start, end)
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "related_transaction_id IS NOT NULL" in sql
+    assert "SUM(amount) AS amount" in sql
+    assert "status <> 'Cancelado'" in sql
+    assert "transaction_date >= $1" in sql
+    assert "transaction_date < $2" in sql
+    assert params == [start, end]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_packages_uses_jsonb_operator():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_packages(start, end)
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "package_details->>" in sql
+    assert "package_details IS NOT NULL" in sql
+    assert "SUM(amount) AS amount" in sql
+    assert "status <> 'Cancelado'" in sql
+    assert "transaction_date >= $1" in sql
+    assert "transaction_date < $2" in sql
+    assert params == [start, end]
+
+    database.pool = None
+
+
+@pytest.mark.asyncio
+async def test_get_report_person_uses_split_details_jsonb():
+    mock_pool = MagicMock()
+    mock_pool.fetch = AsyncMock(return_value=[])
+    database.pool = mock_pool
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    await database.get_report_person(start, end)
+
+    sql, *params = mock_pool.fetch.call_args.args
+    assert "jsonb_each_text" in sql
+    assert "split_details IS NOT NULL" in sql
+    assert "SUM(" in sql
+    assert "AS total" in sql
+    assert "AS label" in sql
+    assert "status <> 'Cancelado'" in sql
+    assert "transaction_date >= $1" in sql
+    assert "transaction_date < $2" in sql
+    assert params == [start, end]
+
+    database.pool = None
+
+
+def test_dimension_allowlist_matches_expected_dimensions():
+    assert set(database.REPORT_DIMENSION_SQL) == {
+        "category", "merchant", "payment_method", "location", "tag",
+    }
+
+
+def _all_report_sql():
+    dimension_variants = [
+        variant
+        for pair in database.REPORT_DIMENSION_SQL.values()
+        for variant in pair
+    ]
+    return dimension_variants + [
+        database.REPORT_SUMMARY_SQL,
+        database.REPORT_SHARED_SQL,
+        database.REPORT_INSTALLMENTS_SQL,
+        database.REPORT_RECURRENCE_SQL,
+        database.REPORT_DUE_DATES_SQL,
+        database.REPORT_TRANSFERS_SQL,
+        database.REPORT_REFUNDS_SQL,
+        database.REPORT_PACKAGES_SQL,
+        database.REPORT_PERSON_SQL,
+    ]
+
+
+def test_all_report_queries_filter_cancelled_and_use_half_open_bounds():
+    for sql in _all_report_sql():
+        assert "status <> 'Cancelado'" in sql
+        assert "transaction_date >= $1" in sql
+        assert "transaction_date < $2" in sql
+        assert "SUM(" in sql
+
+
+def test_report_queries_bind_values_not_interpolate_them():
+    for sql in _all_report_sql():
+        assert "2026" not in sql
+        assert "Comida" not in sql
+    filtered_variants = [
+        pair[1]
+        for pair in database.REPORT_DIMENSION_SQL.values()
+    ]
+    for sql in filtered_variants:
+        assert "$3" in sql

@@ -249,6 +249,183 @@ ALL_SQL = """
 SELECT * FROM transactions ORDER BY transaction_date DESC, created_at DESC;
 """
 
+_DIMENSION_GROUP_EXPR = {
+    "category": "category",
+    "merchant": "merchant",
+    "payment_method": "payment_method",
+    "location": "location",
+    "tag": "unnest(tags)",
+}
+
+_DIMENSION_VALUE_FILTERS = {
+    "category": "category = $3",
+    "merchant": "merchant = $3",
+    "payment_method": "payment_method = $3",
+    "location": "location = $3",
+    "tag": "$3 = ANY(tags)",
+}
+
+REPORT_DIMENSION_SQL = {}
+for _dimension in _DIMENSION_GROUP_EXPR:
+    _group_expr = _DIMENSION_GROUP_EXPR[_dimension]
+    _value_filter = _DIMENSION_VALUE_FILTERS[_dimension]
+    REPORT_DIMENSION_SQL[_dimension] = (
+        f"""SELECT {_group_expr} AS label, SUM(amount) AS total, currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+GROUP BY {_group_expr}, currency
+ORDER BY total DESC""",
+        f"""SELECT {_group_expr} AS label, SUM(amount) AS total, currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+  AND {_value_filter}
+GROUP BY {_group_expr}, currency
+ORDER BY total DESC""",
+    )
+del _dimension, _group_expr, _value_filter
+
+REPORT_SUMMARY_SQL = """
+SELECT
+    COALESCE(SUM(amount) FILTER (WHERE type = 'Ingreso'), 0) AS income,
+    COALESCE(SUM(amount) FILTER (WHERE type = 'Gasto'), 0) AS expenses,
+    COALESCE(SUM(amount) FILTER (WHERE amount < total_amount), 0) AS shared_total,
+    COALESCE(SUM(amount) FILTER (WHERE type = 'Ingreso'), 0)
+        - COALESCE(SUM(amount) FILTER (WHERE type = 'Gasto'), 0) AS net,
+    currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+GROUP BY currency
+ORDER BY currency;
+"""
+
+REPORT_SHARED_SQL = """
+SELECT
+    currency AS label,
+    SUM(amount) AS amount,
+    SUM(total_amount) AS total_amount,
+    currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+  AND amount < total_amount
+GROUP BY currency
+ORDER BY total_amount DESC;
+"""
+
+REPORT_INSTALLMENTS_SQL = """
+SELECT
+    COALESCE(NULLIF(merchant, ''), description, category) AS label,
+    installment_number,
+    installment_total,
+    SUM(amount) AS amount,
+    currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+  AND installment_number IS NOT NULL
+  AND installment_total IS NOT NULL
+  AND installment_total > 1
+GROUP BY label, installment_number, installment_total, currency
+ORDER BY label, installment_number;
+"""
+
+REPORT_RECURRENCE_SQL = """
+SELECT
+    COALESCE(NULLIF(merchant, ''), description, category) AS label,
+    recurrence,
+    SUM(amount) AS amount,
+    currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+  AND recurrence IS NOT NULL
+GROUP BY label, recurrence, currency
+ORDER BY label;
+"""
+
+REPORT_DUE_DATES_SQL = """
+SELECT
+    COALESCE(NULLIF(merchant, ''), description, category) AS label,
+    due_date,
+    SUM(amount) AS amount,
+    currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+  AND due_date IS NOT NULL
+GROUP BY label, due_date, currency
+ORDER BY due_date;
+"""
+
+REPORT_TRANSFERS_SQL = """
+SELECT
+    COALESCE(
+        transfer_details->>'counterparty',
+        transfer_details->>'bank',
+        description,
+        merchant,
+        category
+    ) AS label,
+    SUM(amount) AS amount,
+    currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+  AND transfer_details IS NOT NULL
+GROUP BY label, currency
+ORDER BY amount DESC;
+"""
+
+REPORT_REFUNDS_SQL = """
+SELECT
+    COALESCE(NULLIF(merchant, ''), description, category) AS label,
+    SUM(amount) AS amount,
+    currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+  AND related_transaction_id IS NOT NULL
+GROUP BY label, currency
+ORDER BY amount DESC;
+"""
+
+REPORT_PACKAGES_SQL = """
+SELECT
+    COALESCE(
+        package_details->>'name',
+        package_details->>'provider',
+        description,
+        merchant,
+        category
+    ) AS label,
+    SUM(amount) AS amount,
+    currency
+FROM transactions
+WHERE status <> 'Cancelado'
+  AND transaction_date >= $1 AND transaction_date < $2
+  AND package_details IS NOT NULL
+GROUP BY label, currency
+ORDER BY amount DESC;
+"""
+
+REPORT_PERSON_SQL = """
+SELECT
+    kv.participant AS label,
+    SUM(kv.share::numeric) AS total,
+    t.currency
+FROM transactions t
+CROSS JOIN LATERAL jsonb_each_text(t.split_details) AS kv(participant, share)
+WHERE t.status <> 'Cancelado'
+  AND t.transaction_date >= $1 AND t.transaction_date < $2
+  AND t.split_details IS NOT NULL
+  AND jsonb_typeof(t.split_details) = 'object'
+GROUP BY kv.participant, t.currency
+ORDER BY total DESC;
+"""
+
 
 async def init_db() -> None:
     global pool
@@ -375,5 +552,115 @@ async def get_all_transactions() -> list[asyncpg.Record]:
         return await pool.fetch(ALL_SQL)
     except Exception as e:
         logger.error("Error fetching all transactions: %s", e)
+        raise
+
+
+async def get_report_summary(start: datetime, end: datetime) -> list[asyncpg.Record]:
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    try:
+        return await pool.fetch(REPORT_SUMMARY_SQL, start, end)
+    except Exception as e:
+        logger.error("Error fetching report summary: %s", e)
+        raise
+
+
+async def get_report_by_dimension(
+    dimension: str, start: datetime, end: datetime, value: str | None = None
+) -> list[asyncpg.Record]:
+    if dimension not in REPORT_DIMENSION_SQL:
+        raise ValueError(f"Unsupported report dimension: {dimension}")
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    if value is None:
+        sql, _ = REPORT_DIMENSION_SQL[dimension]
+        params = [start, end]
+    else:
+        _, sql = REPORT_DIMENSION_SQL[dimension]
+        params = [start, end, value]
+    try:
+        return await pool.fetch(sql, *params)
+    except Exception as e:
+        logger.error("Error fetching %s report: %s", dimension, e)
+        raise
+
+
+async def get_report_shared(start: datetime, end: datetime) -> list[asyncpg.Record]:
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    try:
+        return await pool.fetch(REPORT_SHARED_SQL, start, end)
+    except Exception as e:
+        logger.error("Error fetching shared report: %s", e)
+        raise
+
+
+async def get_report_installments(start: datetime, end: datetime) -> list[asyncpg.Record]:
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    try:
+        return await pool.fetch(REPORT_INSTALLMENTS_SQL, start, end)
+    except Exception as e:
+        logger.error("Error fetching installments report: %s", e)
+        raise
+
+
+async def get_report_recurrence(start: datetime, end: datetime) -> list[asyncpg.Record]:
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    try:
+        return await pool.fetch(REPORT_RECURRENCE_SQL, start, end)
+    except Exception as e:
+        logger.error("Error fetching recurrence report: %s", e)
+        raise
+
+
+async def get_report_due_dates(start: datetime, end: datetime) -> list[asyncpg.Record]:
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    try:
+        return await pool.fetch(REPORT_DUE_DATES_SQL, start, end)
+    except Exception as e:
+        logger.error("Error fetching due dates report: %s", e)
+        raise
+
+
+async def get_report_transfers(start: datetime, end: datetime) -> list[asyncpg.Record]:
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    try:
+        return await pool.fetch(REPORT_TRANSFERS_SQL, start, end)
+    except Exception as e:
+        logger.error("Error fetching transfers report: %s", e)
+        raise
+
+
+async def get_report_refunds(start: datetime, end: datetime) -> list[asyncpg.Record]:
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    try:
+        return await pool.fetch(REPORT_REFUNDS_SQL, start, end)
+    except Exception as e:
+        logger.error("Error fetching refunds report: %s", e)
+        raise
+
+
+async def get_report_packages(start: datetime, end: datetime) -> list[asyncpg.Record]:
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    try:
+        return await pool.fetch(REPORT_PACKAGES_SQL, start, end)
+    except Exception as e:
+        logger.error("Error fetching packages report: %s", e)
+        raise
+
+
+async def get_report_person(start: datetime, end: datetime) -> list[asyncpg.Record]:
+    if pool is None:
+        raise RuntimeError("Database connection pool is not initialized")
+    try:
+        return await pool.fetch(REPORT_PERSON_SQL, start, end)
+    except Exception as e:
+        logger.error("Error fetching person report: %s", e)
         raise
 
