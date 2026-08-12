@@ -15,6 +15,40 @@ def make_response(json_text: str):
 
 
 @pytest.mark.asyncio
+async def test_parser_returns_spanish_transaction_contract(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
+        '{"type":"expense","amount":30000,"total_amount":120000,'
+        '"category":"food","description":"cena","payment_method":"cash",'
+        '"participants":["Viole"],"split_details":{"user":30000,"Viole":90000}}'
+    ))
+
+    from app.gemini_ai import parse_transaction_from_text
+
+    result = await parse_transaction_from_text("de 120000 yo puse 30000 para cenar con Viole")
+
+    assert result["type"] == "Gasto"
+    assert result["category"] == "Comida"
+    assert result["description"] == "Cena"
+    assert result["payment_method"] == "Efectivo"
+    assert result["amount"] == 30000
+    assert result["total_amount"] == 120000
+
+
+@pytest.mark.asyncio
+async def test_audio_and_text_use_same_default_keys(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
+        '{"type":"income","amount":1000,"category":"salary",'
+        '"description":"sueldo","payment_method":"transfer"}'
+    ))
+
+    from app.gemini_ai import parse_transaction_from_audio
+
+    result = await parse_transaction_from_audio(b"audio", "audio/ogg")
+
+    assert set(("currency", "tags", "transaction_date", "status", "total_amount")) <= result.keys()
+
+
+@pytest.mark.asyncio
 async def test_payment_method_none_when_not_mentioned(mock_client):
     mock_client.aio.models.generate_content = AsyncMock(
         return_value=make_response(
@@ -39,7 +73,7 @@ async def test_payment_method_preserved_when_mentioned(mock_client):
     from app.gemini_ai import parse_transaction_from_text
     result = await parse_transaction_from_text("gaste 5900 con tarjeta de credito")
     assert result is not None
-    assert result["payment_method"] == "credit card"
+    assert result["payment_method"] == "Tarjeta de Crédito"
 
 
 @pytest.mark.asyncio
@@ -114,17 +148,19 @@ async def test_transaction_date_extracted_when_mentioned(mock_client):
 
 
 @pytest.mark.asyncio
-async def test_transaction_date_default_none_when_omitted(mock_client):
+async def test_transaction_date_defaults_to_current_datetime_when_omitted(mock_client):
     mock_client.aio.models.generate_content = AsyncMock(
         return_value=make_response(
             '{"type":"expense","amount":5000,"currency":"ARS","category":"food",'
             '"description":"cena"}'
         )
     )
+    from datetime import datetime
     from app.gemini_ai import parse_transaction_from_text
-    result = await parse_transaction_from_text("gaste 5000 en cena")
+    test_dt = datetime(2026, 8, 11, 12, 0, 0)
+    result = await parse_transaction_from_text("gaste 5000 en cena", current_datetime=test_dt)
     assert result is not None
-    assert result.get("transaction_date") is None
+    assert result.get("transaction_date") == test_dt
 
 
 @pytest.mark.asyncio
