@@ -90,9 +90,10 @@ async def run_report(request: ReportRequest) -> dict[str, Any]:
     """Route a report request to exactly one database function.
 
     Period and optional filter pass through unchanged. Dimension metrics
-    forward ``value``; the person report drops the reserved ``"user"``
-    pseudo-participant (the personal share, already shown as ``amount``).
-    Metrics without a dispatch branch raise ``ValueError``.
+    forward ``value``; the person report filters to ``value`` when set and
+    drops the reserved ``"user"`` pseudo-participant (the personal share,
+    already shown as ``amount``). Metrics without a dispatch branch raise
+    ``ValueError``.
     """
     if request.metric == "summary":
         return await get_report_summary(request.start, request.end)
@@ -102,6 +103,8 @@ async def run_report(request: ReportRequest) -> dict[str, Any]:
         )
     if request.metric == "person":
         rows = await get_report_person(request.start, request.end)
+        if request.value is not None:
+            rows = [row for row in rows if row.get("label") == request.value]
         return [row for row in rows if row.get("label") != "user"]
     func_name = PERIOD_ONLY_REPORTS.get(request.metric)
     if func_name is None:

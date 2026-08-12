@@ -267,6 +267,39 @@ async def test_run_report_person_returns_empty_when_only_user_rows(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_report_person_value_filter_keeps_only_matching_person(monkeypatch):
+    mocked = AsyncMock(
+        return_value=[
+            {"label": "user", "total": 5000, "currency": "ARS"},
+            {"label": "María", "total": 3000, "currency": "ARS"},
+            {"label": "José", "total": 4000, "currency": "ARS"},
+        ]
+    )
+    monkeypatch.setattr("app.reporting.get_report_person", mocked)
+    request = _request("person", value="José")
+
+    result = await run_report(request)
+
+    assert result == [{"label": "José", "total": 4000, "currency": "ARS"}]
+    mocked.assert_awaited_once_with(request.start, request.end)
+
+
+@pytest.mark.asyncio
+async def test_run_report_person_value_filter_returns_empty_when_no_match(monkeypatch):
+    mocked = AsyncMock(
+        return_value=[
+            {"label": "user", "total": 5000, "currency": "ARS"},
+            {"label": "María", "total": 3000, "currency": "ARS"},
+        ]
+    )
+    monkeypatch.setattr("app.reporting.get_report_person", mocked)
+
+    result = await run_report(_request("person", value="Nadie"))
+
+    assert result == []
+
+
+@pytest.mark.asyncio
 async def test_run_report_raises_value_error_for_unroutable_metric(monkeypatch):
     mock_summary = AsyncMock(return_value={"income": 0})
     monkeypatch.setattr("app.reporting.get_report_summary", mock_summary)
