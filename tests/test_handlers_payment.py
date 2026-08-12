@@ -558,3 +558,68 @@ async def test_delete_handler_includes_description(mock_recent):
     sent_text = update.message.reply_text.call_args[0][0]
     assert "1. Gasto de $1200 en Transporte — colectivo" in sent_text
     assert "2. Ingreso de $5000 en Trabajo Independiente\n" in sent_text
+
+
+@pytest.mark.asyncio
+async def test_add_context_can_repeat_until_confirm(monkeypatch):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    chat_id = 123
+    handlers.pending_transactions[chat_id] = {
+        "action": "confirm",
+        "data": {"description": "Supermercado", "notes": None},
+    }
+
+    update = make_update(callback_data="add_context", chat_id=chat_id)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    assert handlers.pending_transactions[chat_id]["action"] == "add_context"
+
+    monkeypatch.setattr(
+        "app.handlers.parse_transaction_from_text",
+        AsyncMock(return_value={"location": "Palermo", "notes": None}),
+    )
+    update = make_update(text="Fue en Palermo", chat_id=chat_id)
+    await handlers.message_handler(update, context)
+    assert handlers.pending_transactions[chat_id]["action"] == "confirm"
+    assert handlers.pending_transactions[chat_id]["data"]["location"] == "Palermo"
+
+
+@pytest.mark.asyncio
+async def test_cancel_discards_pending_context():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    chat_id = 123
+    handlers.pending_transactions[chat_id] = {"action": "confirm", "data": {"description": "Cena"}}
+
+    update = make_update(callback_data="cancel", chat_id=chat_id)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+
+    assert chat_id not in handlers.pending_transactions
+
+
+@pytest.mark.asyncio
+async def test_add_context_introducing_participants_enters_pick_split(monkeypatch):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    chat_id = 123
+    handlers.pending_transactions[chat_id] = {
+        "action": "add_context",
+        "data": {
+            "type": "Gasto", "amount": 30000, "total_amount": 30000,
+            "currency": "ARS", "category": "Comida", "description": "Cena",
+            "payment_method": "Efectivo", "transaction_date": "2026-08-10 12:00:00",
+        },
+    }
+    monkeypatch.setattr(
+        "app.handlers.parse_transaction_from_text",
+        AsyncMock(return_value={"participants": ["Viole"]}),
+    )
+    update = make_update(text="Fue con Viole", chat_id=chat_id)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[chat_id]
+    assert state["action"] == "pick_split"
+    assert state["data"]["participants"] == ["Viole"]
+    assert "distribución" in update.message.reply_text.call_args[0][0].lower()

@@ -24,6 +24,7 @@ from app.gemini_ai import (
 from app.transaction_schema import (
     PAYMENT_METHOD_MAP,
     get_missing_transaction_fields,
+    merge_transaction_context,
     normalize_transaction,
 )
 
@@ -262,6 +263,24 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state["data"]["participants"] = [key for key in split_details if key != "user"]
         pending_transactions[chat_id] = state
         await _advance_after_required_fields(update, chat_id, state["data"])
+        return
+
+    if state and state.get("action") == "add_context":
+        await update.message.chat.send_action(action="typing")
+        additions = await parse_transaction_from_text(text)
+        if not additions or "error" in additions:
+            await update.message.reply_text(
+                "No pude entender los detalles adicionales. Envía más detalles "
+                "de la transacción (lugar, etiquetas, cuotas, etc.)."
+            )
+            return
+        merged = merge_transaction_context(state["data"], additions)
+        if _needs_split_question(merged):
+            pending_transactions[chat_id] = {"action": "pick_split", "data": merged}
+            await update.message.reply_text(SPLIT_PROMPT)
+            return
+        pending_transactions[chat_id] = {"action": "confirm", "data": merged}
+        await _send_confirm_message(update, merged)
         return
     
     await update.message.chat.send_action(action="typing")
