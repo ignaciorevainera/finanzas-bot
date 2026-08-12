@@ -4,6 +4,7 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 from app.config import settings
+from app.reporting import ReportRequest
 from app.transaction_schema import apply_transaction_defaults, normalize_transaction
 
 def clean_json_text(text: str) -> str:
@@ -54,6 +55,25 @@ Return ONLY a JSON object with the following fields:
 
 If the input does not contain a date or time expression, return JSON with key "error": "no date found"."""
 
+REPORT_SYSTEM_PROMPT = """You are a financial assistant that extracts report intent from a Spanish user question.
+The current date and time is {current_datetime}.
+Interpret Spanish date phrases (e.g. "este mes", "el mes pasado", "este año", "ayer") relative to the current date and time.
+Return ONLY a JSON object with the following fields:
+- metric: one of ["summary", "category", "merchant", "payment_method", "location", "person", "tag", "installments", "recurrence", "due_dates", "transfers", "refunds", "packages", "shared"]
+- start: ISO 8601 timestamp with timezone, start of the report period (inclusive), e.g. "2026-08-01T00:00:00+00:00"
+- end: ISO 8601 timestamp with timezone, end of the report period (exclusive), e.g. "2026-09-01T00:00:00+00:00"
+- group_by: string or null; optional grouping
+- value: string or null; filter value for the metric (category, payment method, person, or tag)
+
+Return null for any field without an explicit value.
+If the input does not describe a report request, return JSON with key "error": "unsupported report".
+Do not generate or reference any database SQL or table names."""
+
+_REPORT_METRICS = frozenset({
+    "summary", "category", "merchant", "payment_method", "location",
+    "person", "tag", "installments", "recurrence", "due_dates",
+    "transfers", "refunds", "packages", "shared",
+})
 
 
 def _get_formatted_datetime(current_datetime: datetime | str | None) -> str:
@@ -83,6 +103,52 @@ def _finalize_transaction_data(
     data = normalize_transaction(data)
     data.setdefault("tags", [])
     return apply_transaction_defaults(data, now=_resolve_datetime(current_datetime))
+
+
+def _normalize_report_value(metric: str, value: str) -> str:
+    if metric == "category":
+        return normalize_transaction({"category": value})["category"]
+    if metric == "payment_method":
+        return normalize_transaction({"payment_method": value})["payment_method"]
+    if metric in ("person", "tag"):
+        tags = normalize_transaction({"tags": [value]})["tags"]
+        return tags[0] if tags else value
+    return value
+
+
+def _finalize_report_request(data) -> ReportRequest | None:
+    if not isinstance(data, dict) or "error" in data:
+        return None
+    metric = data.get("metric")
+    if metric not in _REPORT_METRICS:
+        return None
+    start, end = data.get("start"), data.get("end")
+    if not isinstance(start, str) or not isinstance(end, str):
+        return None
+    try:
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+    except ValueError:
+        return None
+    if start_dt.tzinfo is None or end_dt.tzinfo is None:
+        return None
+    if end_dt <= start_dt:
+        return None
+    group_by = data.get("group_by")
+    if not isinstance(group_by, str):
+        group_by = None
+    value = data.get("value")
+    if value is not None:
+        if not isinstance(value, str):
+            return None
+        value = _normalize_report_value(metric, value)
+    try:
+        return ReportRequest(
+            metric=metric, start=start_dt, end=end_dt,
+            group_by=group_by, value=value,
+        )
+    except ValueError:
+        return None
 
 
 async def parse_transaction_from_text(
@@ -196,6 +262,42 @@ async def parse_date_from_text(
     except Exception as exc:
         logger.error(
             "Error parsing date from text",
+            extra={"input_text": text, "error": str(exc)},
+            exc_info=True,
+        )
+        return None
+
+
+async def parse_report_request(
+    text: str, current_datetime: datetime | str | None = None
+) -> ReportRequest | None:
+    try:
+        dt_str = _get_formatted_datetime(current_datetime)
+        system_instruction = REPORT_SYSTEM_PROMPT.format(current_datetime=dt_str)
+        response = await client.aio.models.generate_content(
+            model=settings.gemini_model,
+            contents=text,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+            ),
+        )
+        data = json.loads(clean_json_text(response.text))
+        result = _finalize_report_request(data)
+        if result is None:
+            logger.warning(
+                "Failed to parse report request from text: invalid structure",
+                extra={"input_text": text, "response_data": data},
+            )
+            return None
+        logger.info(
+            "Successfully parsed report request from text",
+            extra={"parsed_request": result},
+        )
+        return result
+    except Exception as exc:
+        logger.error(
+            "Error parsing report request from text",
             extra={"input_text": text, "error": str(exc)},
             exc_info=True,
         )
