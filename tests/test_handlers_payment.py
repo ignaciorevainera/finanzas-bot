@@ -1088,6 +1088,50 @@ async def test_callback_stale_state_does_not_mutate():
     state = handlers.pending_transactions[123]
     assert state["action"] == "confirm"
     assert state["data"] == data
+    update.callback_query.edit_message_text.assert_awaited_once()
+    assert (
+        "ya no está en ese paso"
+        in update.callback_query.edit_message_text.await_args.kwargs["text"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_callback_stale_in_pick_split_edits_message_without_mutation():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    data = {"type": "Gasto", "amount": 30000, "total_amount": 120000,
+            "participants": ["Viole"]}
+    handlers.pending_transactions[123] = {"action": "pick_split", "data": data}
+    update = make_update(callback_data="missing_type_expense", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_split"
+    assert state["data"] == data
+    update.callback_query.edit_message_text.assert_awaited_once()
+    assert (
+        "ya no está en ese paso"
+        in update.callback_query.edit_message_text.await_args.kwargs["text"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_callback_stale_in_pick_date_edits_message_without_mutation():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    data = {"amount": 500}
+    handlers.pending_transactions[123] = {"action": "pick_date", "data": data}
+    update = make_update(callback_data="missing_type_expense", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_date"
+    assert state["data"] == data
+    update.callback_query.edit_message_text.assert_awaited_once()
+    assert (
+        "ya no está en ese paso"
+        in update.callback_query.edit_message_text.await_args.kwargs["text"]
+    )
 
 
 @pytest.mark.asyncio

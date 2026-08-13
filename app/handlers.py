@@ -53,6 +53,11 @@ TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
 
 MISSING_INVALID_OPTION_TEXT = "Opción no válida. Intenta de nuevo."
 
+STALE_CALLBACK_TEXT = (
+    "La transacción ya no está en ese paso. Envía una nueva transacción "
+    "o usa /cancel si lo deseas."
+)
+
 CATEGORY_OPTIONS: tuple[str, ...] = tuple(dict.fromkeys(CATEGORY_MAP.values()))
 
 PAYMENT_METHOD_OPTIONS: tuple[str, ...] = tuple(PAYMENT_METHOD_MAP.values())
@@ -905,22 +910,22 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    if state.get("action") == "confirm" and query.data == "add_context":
-        pending_transactions[chat_id] = {"action": "add_context", "data": state["data"]}
-        await query.edit_message_text(
-            text="Envía más detalles de la transacción (lugar, etiquetas, cuotas, etc.)."
-        )
+    if state.get("action") == "confirm":
+        if query.data == "add_context":
+            pending_transactions[chat_id] = {"action": "add_context", "data": state["data"]}
+            await query.edit_message_text(
+                text="Envía más detalles de la transacción (lugar, etiquetas, cuotas, etc.)."
+            )
+        elif query.data == "confirm":
+            data = pending_transactions.pop(chat_id)["data"]
+            await insert_transaction(data)
+            await query.edit_message_text(text="Transacción guardada exitosamente. ✅")
+        elif query.data == "cancel":
+            pending_transactions.pop(chat_id, None)
+            await query.edit_message_text(text="Transacción cancelada.")
+        else:
+            await query.edit_message_text(text=STALE_CALLBACK_TEXT)
         return
 
-    if state.get("action") != "confirm":
-        await query.edit_message_text(text="No hay transacción pendiente para confirmar.")
-        return
-
-    if query.data == "confirm":
-        data = pending_transactions.pop(chat_id)["data"]
-        await insert_transaction(data)
-        await query.edit_message_text(text="Transacción guardada exitosamente. ✅")
-    elif query.data == "cancel":
-        pending_transactions.pop(chat_id, None)
-        await query.edit_message_text(text="Transacción cancelada.")
+    await query.edit_message_text(text=STALE_CALLBACK_TEXT)
 
