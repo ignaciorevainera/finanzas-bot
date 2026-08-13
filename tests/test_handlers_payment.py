@@ -881,3 +881,264 @@ def test_keyboard_field_prompts():
     assert _get_missing_field_prompt("amount") == "¿Cuál es el monto de la transacción?"
     assert _get_missing_field_prompt("category") == "Selecciona una categoría:"
     assert _get_missing_field_prompt("payment_method") == "Selecciona el método de pago:"
+
+
+@pytest.mark.asyncio
+async def test_missing_type_shows_keyboard():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    update = make_update(text="gaste 500")
+    context = MagicMock()
+    data = {"amount": 500, "category": "Comida", "description": "Cena",
+            "payment_method": "Efectivo", "currency": "ARS",
+            "status": "Completado", "transaction_date": "2026-08-12"}
+
+    await handlers.handle_parsed_data(update, context, data)
+
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_missing"
+    assert state["field"] == "type"
+    assert state["missing_fields"] == ["type"]
+    assert update.message.reply_text.await_args.kwargs["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
+async def test_detected_type_skips_type_keyboard():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    update = make_update(text="gaste 500")
+    context = MagicMock()
+    data = {"type": "Gasto", "amount": 500, "description": "Cena",
+            "payment_method": "Efectivo", "currency": "ARS",
+            "status": "Completado", "transaction_date": "2026-08-12"}
+
+    await handlers.handle_parsed_data(update, context, data)
+
+    state = handlers.pending_transactions[123]
+    assert state["field"] == "category"
+    labels = [
+        b.text
+        for row in update.message.reply_text.await_args.kwargs["reply_markup"].inline_keyboard
+        for b in row
+    ]
+    assert "Gasto" not in labels
+    assert "Otra categoría" in labels
+
+
+@pytest.mark.asyncio
+async def test_callback_type_selection_sets_value_and_advances():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "type",
+        "missing_fields": ["type", "category"],
+        "missing_index": 0,
+        "data": {"amount": 500, "transaction_date": "2026-08-12"},
+    }
+    update = make_update(callback_data="missing_type_expense", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_missing"
+    assert state["data"]["type"] == "Gasto"
+    assert state["missing_index"] == 1
+    assert state["field"] == "category"
+    update.callback_query.edit_message_text.assert_awaited_once()
+    assert (
+        update.callback_query.edit_message_text.await_args.kwargs["reply_markup"]
+        is not None
+    )
+
+
+@pytest.mark.asyncio
+async def test_callback_last_field_advances_to_confirm():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "payment_method",
+        "missing_fields": ["payment_method"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "category": "Comida",
+                 "description": "Cena", "transaction_date": "2026-08-12"},
+    }
+    update = make_update(callback_data="missing_payment_cash", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+    assert state["data"]["payment_method"] == "Efectivo"
+
+
+@pytest.mark.asyncio
+async def test_callback_category_maps_base_value():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "category",
+        "missing_fields": ["category"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "description": "Cena",
+                 "payment_method": "Efectivo", "transaction_date": "2026-08-12"},
+    }
+    update = make_update(callback_data="missing_cat_food", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+    assert state["data"]["category"] == "Comida"
+
+
+@pytest.mark.asyncio
+async def test_callback_base_category_otros_maps_to_otros():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "category",
+        "missing_fields": ["category"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "description": "Cena",
+                 "payment_method": "Efectivo", "transaction_date": "2026-08-12"},
+    }
+    update = make_update(callback_data="missing_cat_other", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+    assert state["data"]["category"] == "Otros"
+
+
+@pytest.mark.asyncio
+async def test_callback_custom_category_enters_pick_custom_category():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "category",
+        "missing_fields": ["category", "payment_method"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "description": "Cena",
+                 "payment_method": "Efectivo", "transaction_date": "2026-08-12"},
+    }
+    update = make_update(callback_data="missing_category_other", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_custom_category"
+    assert state["data"]["type"] == "Gasto"
+    assert "categoría" in update.callback_query.edit_message_text.call_args[1]["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_callback_unknown_option_does_not_mutate_data():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    state_data = {"amount": 500, "transaction_date": "2026-08-12"}
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "type",
+        "missing_fields": ["type", "category"],
+        "missing_index": 0,
+        "data": state_data,
+    }
+    update = make_update(callback_data="missing_type_invented", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_missing"
+    assert state["missing_index"] == 0
+    assert state["data"] == state_data
+    update.callback_query.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_callback_wrong_field_does_not_mutate_data():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    state_data = {"amount": 500, "transaction_date": "2026-08-12"}
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "type",
+        "missing_fields": ["type", "category"],
+        "missing_index": 0,
+        "data": state_data,
+    }
+    update = make_update(callback_data="missing_cat_food", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_missing"
+    assert state["missing_index"] == 0
+    assert state["data"] == state_data
+    assert "category" not in state["data"]
+
+
+@pytest.mark.asyncio
+async def test_callback_stale_state_does_not_mutate():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    data = {"amount": 500}
+    handlers.pending_transactions[123] = {"action": "confirm", "data": data}
+    update = make_update(callback_data="missing_type_expense", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+    assert state["data"] == data
+
+
+@pytest.mark.asyncio
+async def test_callback_absent_state_edits_without_mutating():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    update = make_update(callback_data="missing_type_expense", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    assert 123 not in handlers.pending_transactions
+    update.callback_query.edit_message_text.assert_awaited_once_with(
+        text="No hay transacción pendiente."
+    )
+
+
+@pytest.mark.asyncio
+async def test_text_fallback_advances_missing_field():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "payment_method",
+        "missing_fields": ["payment_method"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "category": "Comida",
+                 "description": "Cena", "transaction_date": "2026-08-12"},
+    }
+    update = make_update(text="tarjeta de debito", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+    assert state["data"]["payment_method"] == "Tarjeta de Débito"
+
+
+@pytest.mark.asyncio
+async def test_text_invalid_answer_reprompts_with_keyboard():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "type",
+        "missing_fields": ["type"],
+        "missing_index": 0,
+        "data": {"amount": 500, "transaction_date": "2026-08-12"},
+    }
+    update = make_update(text="inventado", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_missing"
+    assert state["missing_index"] == 0
+    assert "type" not in state["data"]
+    assert update.message.reply_text.call_args[1]["reply_markup"] is not None

@@ -51,6 +51,8 @@ TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Ingreso", "missing_type_income"),
 )
 
+MISSING_INVALID_OPTION_TEXT = "Opción no válida. Intenta de nuevo."
+
 CATEGORY_OPTIONS: tuple[str, ...] = tuple(dict.fromkeys(CATEGORY_MAP.values()))
 
 PAYMENT_METHOD_OPTIONS: tuple[str, ...] = tuple(PAYMENT_METHOD_MAP.values())
@@ -63,6 +65,20 @@ _PAYMENT_METHOD_CALLBACKS: dict[str, str] = {
     value: f"missing_payment_{key.replace(' ', '_')}"
     for key, value in PAYMENT_METHOD_MAP.items()
 }
+
+_TYPE_CALLBACK_VALUES: dict[str, str] = {
+    callback: label for label, callback in TYPE_OPTIONS
+}
+
+_PAYMENT_METHOD_CALLBACK_VALUES: dict[str, str] = {
+    callback: value for value, callback in _PAYMENT_METHOD_CALLBACKS.items()
+}
+_PAYMENT_METHOD_CALLBACK_VALUES.update({
+    "missing_payment_debit": "Tarjeta de Débito",
+    "missing_payment_credit": "Tarjeta de Crédito",
+})
+
+_CUSTOM_CATEGORY = object()
 
 SPLIT_PROMPT = (
     "Este movimiento parece compartido. Indica la distribución exacta de los montos, "
@@ -242,6 +258,43 @@ def _match_diacritic_insensitive(
     for canonical in canonical_values:
         if _strip_diacritics(canonical).lower() == stripped:
             return canonical
+    return None
+
+
+def _resolve_missing_field_callback(
+    callback_data: str,
+) -> tuple[str, str | object] | None:
+    """Resolve a `missing_*` callback into (field, canonical value).
+
+    Returns (field, _CUSTOM_CATEGORY) for the custom category row.
+    Base category `Otros` uses `missing_cat_other`; the custom row uses
+    `missing_category_other`. The `missing_category_<key>` scheme is honored
+    for base categories too.
+    """
+    if callback_data == "missing_category_other":
+        return ("category", _CUSTOM_CATEGORY)
+    if callback_data.startswith("missing_type_"):
+        value = _TYPE_CALLBACK_VALUES.get(callback_data)
+        if value is not None:
+            return ("type", value)
+        return None
+    if callback_data.startswith("missing_cat_"):
+        key = callback_data[len("missing_cat_"):]
+        value = CATEGORY_MAP.get(key)
+        if value is not None:
+            return ("category", value)
+        return None
+    if callback_data.startswith("missing_category_"):
+        key = callback_data[len("missing_category_"):]
+        value = CATEGORY_MAP.get(key)
+        if value is not None:
+            return ("category", value)
+        return None
+    if callback_data.startswith("missing_payment_"):
+        value = _PAYMENT_METHOD_CALLBACK_VALUES.get(callback_data)
+        if value is not None:
+            return ("payment_method", value)
+        return None
     return None
 
 
@@ -448,22 +501,19 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if state and state.get("action") == "pick_missing":
-        field = state["missing_fields"][state["missing_index"]]
+        field = state.get("field") or state["missing_fields"][state["missing_index"]]
         value = _parse_missing_field_answer(field, text)
         if value is None:
-            await update.message.reply_text(MISSING_FIELD_PROMPTS[field])
+            await update.message.reply_text(
+                _get_missing_field_prompt(field),
+                reply_markup=_get_missing_field_keyboard(field),
+            )
             return
         state["data"][field] = value
         if field == "amount" and state["data"].get("total_amount") in (None, ""):
             state["data"]["total_amount"] = value
         state["missing_index"] += 1
-        if state["missing_index"] < len(state["missing_fields"]):
-            pending_transactions[chat_id] = state
-            next_field = state["missing_fields"][state["missing_index"]]
-            await update.message.reply_text(MISSING_FIELD_PROMPTS[next_field])
-            return
-        pending_transactions[chat_id] = state
-        await _advance_after_required_fields(update, chat_id, state["data"])
+        await _advance_missing_field(update, state)
         return
 
     if state and state.get("action") == "pick_split":
@@ -541,13 +591,15 @@ async def handle_parsed_data(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     missing_fields = get_missing_transaction_fields(data)
     if missing_fields:
-        pending_transactions[chat_id] = {
+        state = {
             "action": "pick_missing",
-            "data": data,
+            "field": missing_fields[0],
             "missing_fields": missing_fields,
             "missing_index": 0,
+            "data": data,
         }
-        await update.message.reply_text(MISSING_FIELD_PROMPTS[missing_fields[0]])
+        pending_transactions[chat_id] = state
+        await _send_missing_field_message(update, state)
         return
 
     await _advance_after_required_fields(update, chat_id, data)
@@ -569,6 +621,39 @@ async def _advance_after_required_fields(update: Update, chat_id: int, data: dic
 
     pending_transactions[chat_id] = {"action": "confirm", "data": data}
     await _send_confirm_message(update, data)
+
+
+async def _send_missing_field_message(update: Update, state: dict) -> None:
+    field = state["missing_fields"][state["missing_index"]]
+    state["field"] = field
+    await update.message.reply_text(
+        _get_missing_field_prompt(field),
+        reply_markup=_get_missing_field_keyboard(field),
+    )
+
+
+async def _advance_missing_field(
+    update: Update, state: dict, *, via_query: bool = False
+) -> None:
+    chat_id = update.effective_chat.id
+    if state["missing_index"] < len(state["missing_fields"]):
+        state["field"] = state["missing_fields"][state["missing_index"]]
+        pending_transactions[chat_id] = state
+        text = _get_missing_field_prompt(state["field"])
+        keyboard = _get_missing_field_keyboard(state["field"])
+        if via_query:
+            await update.callback_query.edit_message_text(text=text, reply_markup=keyboard)
+        else:
+            await update.message.reply_text(text, reply_markup=keyboard)
+        return
+    pending_transactions[chat_id] = {"action": "confirm", "data": state["data"]}
+    if via_query:
+        await update.callback_query.edit_message_text(
+            text=_build_confirm_text(state["data"]),
+            reply_markup=_get_confirm_keyboard(),
+        )
+    else:
+        await _send_confirm_message(update, state["data"])
 
 
 def _parse_missing_field_answer(field: str, text: str) -> str | float | None:
@@ -751,6 +836,30 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not state:
         await query.edit_message_text(text="No hay transacción pendiente.")
+        return
+
+    if state.get("action") == "pick_missing":
+        if not query.data.startswith("missing_"):
+            await query.edit_message_text(text=MISSING_INVALID_OPTION_TEXT)
+            return
+        resolved = _resolve_missing_field_callback(query.data)
+        if resolved is None or resolved[0] != state.get("field"):
+            await query.edit_message_text(text=MISSING_INVALID_OPTION_TEXT)
+            return
+        field, value = resolved
+        if value is _CUSTOM_CATEGORY:
+            pending_transactions[chat_id] = {
+                "action": "pick_custom_category",
+                "field": field,
+                "missing_fields": state["missing_fields"],
+                "missing_index": state["missing_index"],
+                "data": state["data"],
+            }
+            await query.edit_message_text(text="Escribe la categoría personalizada:")
+            return
+        state["data"][field] = value
+        state["missing_index"] += 1
+        await _advance_missing_field(update, state, via_query=True)
         return
 
     if state.get("action") == "pick_date" and query.data.startswith("date_"):
