@@ -23,6 +23,7 @@ from app.gemini_ai import (
 )
 from app.reporting import ReportRequest, run_report, format_report
 from app.transaction_schema import (
+    CATEGORY_MAP,
     PAYMENT_METHOD_MAP,
     get_missing_transaction_fields,
     merge_transaction_context,
@@ -38,11 +39,29 @@ PAYMENT_METHOD_LABELS: dict[str, str] = {
 }
 
 MISSING_FIELD_PROMPTS: dict[str, str] = {
-    "type": "¿Cuál es el tipo de transacción? Responde 'gasto' o 'ingreso'.",
+    "type": "Selecciona tipo de transacción:",
     "amount": "¿Cuál es el monto de la transacción?",
-    "category": "¿En qué categoría clasifico esta transacción?",
+    "category": "Selecciona una categoría:",
     "description": "¿Cuál es el concepto o descripción de la transacción?",
-    "payment_method": "¿Con qué método de pago se realizó? (Efectivo, Tarjeta de Débito, Tarjeta de Crédito, Transferencia u Otro)",
+    "payment_method": "Selecciona el método de pago:",
+}
+
+TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("Gasto", "missing_type_expense"),
+    ("Ingreso", "missing_type_income"),
+)
+
+CATEGORY_OPTIONS: tuple[str, ...] = tuple(dict.fromkeys(CATEGORY_MAP.values()))
+
+PAYMENT_METHOD_OPTIONS: tuple[str, ...] = tuple(PAYMENT_METHOD_MAP.values())
+
+_CATEGORY_CALLBACKS: dict[str, str] = {
+    value: f"missing_cat_{key}" for key, value in CATEGORY_MAP.items()
+}
+
+_PAYMENT_METHOD_CALLBACKS: dict[str, str] = {
+    value: f"missing_payment_{key.replace(' ', '_')}"
+    for key, value in PAYMENT_METHOD_MAP.items()
 }
 
 SPLIT_PROMPT = (
@@ -153,6 +172,63 @@ def _get_confirm_keyboard() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def _get_missing_field_keyboard(field: str) -> InlineKeyboardMarkup | None:
+    if field == "type":
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(label, callback_data=callback)
+                for label, callback in TYPE_OPTIONS
+            ]
+        ])
+    if field == "category":
+        rows = _build_two_column_keyboard(CATEGORY_OPTIONS, _CATEGORY_CALLBACKS)
+        rows.append([
+            InlineKeyboardButton("Otra categoría", callback_data="missing_category_other")
+        ])
+        return InlineKeyboardMarkup(rows)
+    if field == "payment_method":
+        rows = _build_two_column_keyboard(
+            PAYMENT_METHOD_OPTIONS, _PAYMENT_METHOD_CALLBACKS
+        )
+        return InlineKeyboardMarkup(rows)
+    return None
+
+
+def _build_two_column_keyboard(
+    options: tuple[str, ...], callbacks: dict[str, str]
+) -> list[list[InlineKeyboardButton]]:
+    return [
+        [
+            InlineKeyboardButton(label, callback_data=callbacks[label])
+            for label in options[index:index + 2]
+        ]
+        for index in range(0, len(options), 2)
+    ]
+
+
+def _get_missing_field_prompt(field: str) -> str:
+    return MISSING_FIELD_PROMPTS[field]
+
+
+def _resolve_missing_field_answer(field: str, value: str) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    if field in ("type", "payment_method"):
+        canonical = (
+            tuple(label for label, _ in TYPE_OPTIONS)
+            if field == "type"
+            else PAYMENT_METHOD_OPTIONS
+        )
+        normalized = normalize_transaction({field: value}).get(field)
+        return normalized if normalized in canonical else None
+    if field == "category":
+        normalized = normalize_transaction({field: value}).get(field)
+        if isinstance(normalized, str) and normalized.strip():
+            return normalized
+        return None
+    return None
 
 
 def check_access(update: Update) -> bool:

@@ -802,3 +802,72 @@ def test_split_is_valid_requires_known_total_amount():
         {"amount": 30000},
         {"user": 30000, "Viole": 90000},
     ) is False
+
+
+def test_type_keyboard_has_two_options():
+    from app.handlers import _get_missing_field_keyboard
+    keyboard = _get_missing_field_keyboard("type")
+    buttons = [b for row in keyboard.inline_keyboard for b in row]
+    assert [b.text for b in buttons] == ["Gasto", "Ingreso"]
+    assert [b.callback_data for b in buttons] == [
+        "missing_type_expense", "missing_type_income"
+    ]
+
+
+def test_category_keyboard_has_seventeen_buttons_and_two_columns():
+    from app.handlers import _get_missing_field_keyboard
+    keyboard = _get_missing_field_keyboard("category")
+    buttons = [b for row in keyboard.inline_keyboard for b in row]
+    assert len(buttons) == 17
+    assert len(keyboard.inline_keyboard[0]) == 2
+    assert buttons[-1].text == "Otra categoría"
+    assert buttons[-1].callback_data == "missing_category_other"
+
+
+def test_payment_method_keyboard_has_five_buttons_two_columns():
+    from app.handlers import _get_missing_field_keyboard
+    keyboard = _get_missing_field_keyboard("payment_method")
+    buttons = [b for row in keyboard.inline_keyboard for b in row]
+    assert [b.text for b in buttons] == [
+        "Efectivo", "Tarjeta de Débito", "Tarjeta de Crédito",
+        "Transferencia", "Otro",
+    ]
+    assert len(keyboard.inline_keyboard[0]) == 2
+    assert buttons[-1].text == "Otro"
+
+
+def test_text_resolver_accepts_equivalent_values():
+    from app.handlers import _resolve_missing_field_answer
+    assert _resolve_missing_field_answer("type", "gasto") == "Gasto"
+    assert _resolve_missing_field_answer("category", "comida") == "Comida"
+    assert _resolve_missing_field_answer("payment_method", "efectivo") == "Efectivo"
+    assert _resolve_missing_field_answer("payment_method", "inventado") is None
+
+
+def test_resolver_rejects_unknown_closed_choice_values():
+    from app.handlers import _resolve_missing_field_answer
+    assert _resolve_missing_field_answer("type", "inventado") is None
+    assert _resolve_missing_field_answer("category", "") is None
+    assert _resolve_missing_field_answer("category", "  ") is None
+    assert _resolve_missing_field_answer("unknown", "gasto") is None
+
+
+def test_resolver_accepts_custom_category_text():
+    from app.handlers import _resolve_missing_field_answer
+    assert _resolve_missing_field_answer("category", "helado") == "Helado"
+    assert _resolve_missing_field_answer("category", "Trabajo") == "Trabajo"
+
+
+def test_missing_field_keyboard_returns_none_for_free_text_fields():
+    from app.handlers import _get_missing_field_keyboard
+    assert _get_missing_field_keyboard("amount") is None
+    assert _get_missing_field_keyboard("description") is None
+    assert _get_missing_field_keyboard("unknown") is None
+
+
+def test_keyboard_field_prompts():
+    from app.handlers import _get_missing_field_prompt
+    assert _get_missing_field_prompt("type") == "Selecciona tipo de transacción:"
+    assert _get_missing_field_prompt("amount") == "¿Cuál es el monto de la transacción?"
+    assert _get_missing_field_prompt("category") == "Selecciona una categoría:"
+    assert _get_missing_field_prompt("payment_method") == "Selecciona el método de pago:"
