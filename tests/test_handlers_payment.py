@@ -582,6 +582,43 @@ async def test_add_context_can_repeat_until_confirm(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_add_context_preserves_explicit_time_flag(monkeypatch):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    chat_id = 123
+    handlers.pending_transactions[chat_id] = {
+        "action": "confirm",
+        "data": {
+            "type": "Gasto", "amount": 5900, "total_amount": 5900,
+            "currency": "ARS", "category": "Comida", "description": "Jugo",
+            "payment_method": "Efectivo",
+            "transaction_date": "2026-08-12T18:30:00+00:00",
+            "transaction_date_has_explicit_time": True,
+        },
+    }
+
+    update = make_update(callback_data="add_context", chat_id=chat_id)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    assert handlers.pending_transactions[chat_id]["action"] == "add_context"
+
+    monkeypatch.setattr(
+        "app.handlers.parse_transaction_from_text",
+        AsyncMock(return_value={
+            "location": "Palermo",
+            "transaction_date_has_explicit_time": False,
+            "transaction_date": None,
+        }),
+    )
+    update = make_update(text="Fue en Palermo", chat_id=chat_id)
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[chat_id]
+    assert state["action"] == "confirm"
+    assert state["data"]["transaction_date_has_explicit_time"] is True
+    assert "Fecha: 12/08/2026 18:30" in update.message.reply_text.call_args[0][0]
+
+
+@pytest.mark.asyncio
 async def test_cancel_discards_pending_context():
     from app import handlers
     handlers.pending_transactions.clear()

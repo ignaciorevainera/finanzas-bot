@@ -166,3 +166,23 @@ def test_merge_ignores_empty_string_additions():
 
     assert result["location"] == "Centro"
     assert result["merchant"] == "Carrefour"
+
+
+def test_merge_preserves_explicit_time_flag_when_date_not_updated():
+    result = merge_transaction_context(
+        {"transaction_date": "2026-08-12 18:30:00", "transaction_date_has_explicit_time": True},
+        {"location": "Palermo", "transaction_date_has_explicit_time": False},
+    )
+
+    assert result["transaction_date_has_explicit_time"] is True
+    assert result["location"] == "Palermo"
+
+
+def test_merge_adopts_explicit_time_flag_when_date_also_updated():
+    result = merge_transaction_context(
+        {"transaction_date": "2026-08-12 18:30:00", "transaction_date_has_explicit_time": True},
+        {"transaction_date": "2026-08-13", "transaction_date_has_explicit_time": False},
+    )
+
+    assert result["transaction_date_has_explicit_time"] is False
+    assert result["transaction_date"] == "2026-08-13"

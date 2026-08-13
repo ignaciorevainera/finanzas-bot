@@ -150,6 +150,13 @@ def merge_transaction_context(
             result[key] = _merge_tags(current.get(key), value)
         elif key == "notes":
             result[key] = _merge_notes(current.get(key), value)
+        elif key == "transaction_date_has_explicit_time":
+            # The flag describes ITS OWN transaction_date: only adopt it when
+            # the additions also overwrite the date. Parser results always
+            # carry the flag (default False), so adopting it unconditionally
+            # would clobber a True flag set for the existing date.
+            if not _is_missing(additions.get("transaction_date")):
+                result[key] = value
         else:
             result[key] = value
     return result
