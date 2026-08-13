@@ -35,6 +35,7 @@ Return ONLY a JSON object with the following fields:
 - location: string or null
 - notes: string or null; residual context that does not fit description, merchant, or location
 - transaction_date: ISO 8601 string ("YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS") if explicit or relative date/time is mentioned in user input (e.g. "ayer", "el lunes", "10/08"), resolved relative to current date and time; null if no date/time is mentioned
+- transaction_date_has_explicit_time: boolean; true only when the input explicitly declares a clock time (e.g. "ayer a las 18:30"), false for date-only expressions, relative dates without time, and no date
 - participants: array of names of people sharing the movement; null if not shared
 - split_details: object mapping each participant name plus the special key "user" to their exact amounts; required whenever the user expresses a personal share or a shared movement; never assume an equal split
 - due_date: ISO 8601 string or null
@@ -101,6 +102,7 @@ def _finalize_transaction_data(
         return None
     data = normalize_transaction(data)
     data.setdefault("tags", [])
+    data.setdefault("transaction_date_has_explicit_time", False)
     return apply_transaction_defaults(data, now=_resolve_datetime(current_datetime))
 
 

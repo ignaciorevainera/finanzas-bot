@@ -411,4 +411,48 @@ async def test_parse_date_from_text_includes_current_datetime(mock_client):
     assert f"The current date and time is {test_dt}." in config.system_instruction
 
 
+@pytest.mark.asyncio
+async def test_relative_date_without_time_sets_explicit_time_false(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
+        '{"type":"expense","amount":5000,"currency":"ARS","category":"food",'
+        '"description":"cena","transaction_date":"2026-08-10",'
+        '"transaction_date_has_explicit_time":false}'
+    ))
+    from app.gemini_ai import parse_transaction_from_text
+    result = await parse_transaction_from_text("gaste 5000 en cena ayer")
+    assert result is not None
+    assert result.get("transaction_date_has_explicit_time") is False
+
+
+@pytest.mark.asyncio
+async def test_explicit_time_sets_explicit_time_true(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
+        '{"type":"expense","amount":5000,"currency":"ARS","category":"food",'
+        '"description":"cena","transaction_date":"2026-08-10T18:30:00+00:00",'
+        '"transaction_date_has_explicit_time":true}'
+    ))
+    from app.gemini_ai import parse_transaction_from_text
+    result = await parse_transaction_from_text("gaste 5000 en cena ayer a las 18:30")
+    assert result is not None
+    assert result.get("transaction_date_has_explicit_time") is True
+
+
+@pytest.mark.asyncio
+async def test_missing_explicit_time_flag_defaults_false(mock_client):
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_response(
+        '{"type":"expense","amount":5000,"currency":"ARS","category":"food",'
+        '"description":"cena"}'
+    ))
+    from app.gemini_ai import parse_transaction_from_text
+    result = await parse_transaction_from_text("gaste 5000 en cena")
+    assert result is not None
+    assert result.get("transaction_date_has_explicit_time") is False
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_includes_explicit_time_contract(mock_client):
+    from app.gemini_ai import SYSTEM_PROMPT
+    assert "transaction_date_has_explicit_time" in SYSTEM_PROMPT
+
+
 

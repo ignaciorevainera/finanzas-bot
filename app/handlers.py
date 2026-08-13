@@ -507,7 +507,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state and state.get("action") == "pick_missing":
         field = state.get("field") or state["missing_fields"][state["missing_index"]]
-        value = _parse_missing_field_answer(field, text)
+        if field in ("type", "category", "payment_method"):
+            value = _resolve_missing_field_answer(field, text)
+        else:
+            value = _parse_missing_field_answer(field, text)
         if value is None:
             await update.message.reply_text(
                 _get_missing_field_prompt(field),
@@ -518,6 +521,21 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if field == "amount" and state["data"].get("total_amount") in (None, ""):
             state["data"]["total_amount"] = value
         state["missing_index"] += 1
+        await _advance_missing_field(update, state)
+        return
+
+    if state and state.get("action") == "pick_custom_category":
+        value = text.strip()
+        if not value:
+            await update.message.reply_text("Escribe la categoría personalizada:")
+            return
+        normalized = normalize_transaction({"category": value}).get("category")
+        if not isinstance(normalized, str) or not normalized.strip():
+            await update.message.reply_text("Escribe la categoría personalizada:")
+            return
+        state["data"]["category"] = normalized
+        state["missing_index"] += 1
+        state["action"] = "pick_missing"
         await _advance_missing_field(update, state)
         return
 
@@ -794,6 +812,19 @@ def _format_datetime(value) -> str:
     return str(value)
 
 
+def _format_transaction_datetime(value, has_explicit_time=False) -> str:
+    if not value:
+        return ""
+    if not has_explicit_time:
+        if isinstance(value, datetime):
+            return value.strftime("%d/%m/%Y")
+        return datetime.fromisoformat(value).strftime("%d/%m/%Y")
+    if isinstance(value, datetime):
+        return value.strftime("%d/%m/%Y %H:%M")
+    parsed = datetime.fromisoformat(value)
+    return parsed.strftime("%d/%m/%Y %H:%M")
+
+
 def _build_confirm_text(data: dict) -> str:
     currency = data.get("currency", "ARS")
     lines = ["Transacción detectada:"]
@@ -811,7 +842,10 @@ def _build_confirm_text(data: dict) -> str:
     payment = data.get("payment_method")
     if payment:
         lines.append(f"Método de pago: {PAYMENT_METHOD_LABELS.get(payment, payment)}")
-    date_str = _format_datetime(data.get("transaction_date"))
+    date_str = _format_transaction_datetime(
+        data.get("transaction_date"),
+        data.get("transaction_date_has_explicit_time", False),
+    )
     if date_str:
         lines.append(f"Fecha: {date_str}")
     if data.get("status"):

@@ -385,7 +385,7 @@ def test_build_confirm_text():
     assert "Monto personal: $1500 ARS" in text
     assert "Categoría: Comida" in text
     assert "Método de pago: 💳 Crédito" in text
-    assert "Fecha: 2026-08-10 20:00" in text
+    assert "Fecha: 10/08/2026" in text
     assert "Comercio: Coto" in text
 
 
@@ -1287,3 +1287,133 @@ async def test_text_completed_missing_fields_split_still_triggers_via_reply():
     assert state["action"] == "pick_split"
     assert state["data"]["payment_method"] == "Efectivo"
     assert "distribución" in update.message.reply_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_text_equivalent_advances_missing_field():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing", "field": "payment_method",
+        "missing_fields": ["payment_method"], "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "category": "Comida",
+                 "description": "Cena", "transaction_date": "2026-08-12"},
+    }
+    update = make_update(text="tarjeta de debito", chat_id=123)
+    context = MagicMock()
+
+    await handlers.message_handler(update, context)
+
+    assert handlers.pending_transactions[123]["action"] == "confirm"
+    assert handlers.pending_transactions[123]["data"]["payment_method"] == "Tarjeta de Débito"
+
+
+def test_confirm_date_omits_time_when_not_declared():
+    from app.handlers import _build_confirm_text
+    text = _build_confirm_text({"type": "Gasto", "amount": 500,
+                                "total_amount": 500, "currency": "ARS",
+                                "category": "Comida", "description": "Cena",
+                                "payment_method": "Efectivo",
+                                "transaction_date": "2026-08-12"})
+    assert "Fecha: 12/08/2026" in text
+    assert "00:00" not in text
+
+
+def test_confirm_date_includes_explicit_time():
+    from app.handlers import _build_confirm_text
+    text = _build_confirm_text({"type": "Gasto", "amount": 500,
+                                "total_amount": 500, "currency": "ARS",
+                                "category": "Comida", "description": "Cena",
+                                "payment_method": "Efectivo",
+                                "transaction_date": "2026-08-12T18:30:00+00:00",
+                                "transaction_date_has_explicit_time": True})
+    assert "Fecha: 12/08/2026 18:30" in text
+
+
+def test_confirm_datetime_object_shows_date_only_without_flag():
+    from datetime import datetime
+    from app.handlers import _build_confirm_text
+    text = _build_confirm_text({"type": "Gasto", "amount": 500,
+                                "total_amount": 500, "currency": "ARS",
+                                "category": "Comida", "description": "Cena",
+                                "payment_method": "Efectivo",
+                                "transaction_date": datetime(2026, 8, 12, 18, 30)})
+    assert "Fecha: 12/08/2026" in text
+    assert "18:30" not in text
+
+
+def test_confirm_datetime_object_shows_time_with_explicit_flag():
+    from datetime import datetime
+    from app.handlers import _build_confirm_text
+    text = _build_confirm_text({"type": "Gasto", "amount": 500,
+                                "total_amount": 500, "currency": "ARS",
+                                "category": "Comida", "description": "Cena",
+                                "payment_method": "Efectivo",
+                                "transaction_date": datetime(2026, 8, 12, 18, 30),
+                                "transaction_date_has_explicit_time": True})
+    assert "Fecha: 12/08/2026 18:30" in text
+
+
+@pytest.mark.asyncio
+async def test_pick_custom_category_text_stores_normalized_and_resumes():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_custom_category",
+        "field": "category",
+        "missing_fields": ["category", "payment_method"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "description": "Cena",
+                 "payment_method": None, "transaction_date": "2026-08-12"},
+    }
+    update = make_update(text="helado", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_missing"
+    assert state["data"]["category"] == "Helado"
+    assert state["field"] == "payment_method"
+    assert state["missing_index"] == 1
+    assert update.message.reply_text.await_args.kwargs["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
+async def test_pick_custom_category_last_field_advances_to_confirm():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_custom_category",
+        "field": "category",
+        "missing_fields": ["category"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "description": "Cena",
+                 "payment_method": "Efectivo", "transaction_date": "2026-08-12"},
+    }
+    update = make_update(text="gimnasio", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+    assert state["data"]["category"] == "Gimnasio"
+
+
+@pytest.mark.asyncio
+async def test_pick_custom_category_empty_text_reprompts_without_mutation():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_custom_category",
+        "field": "category",
+        "missing_fields": ["category", "payment_method"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "description": "Cena",
+                 "payment_method": None, "transaction_date": "2026-08-12"},
+    }
+    update = make_update(text="   ", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_custom_category"
+    assert state["missing_index"] == 0
+    assert "category" not in state["data"]
+    assert "categoría" in update.message.reply_text.call_args[0][0].lower()
