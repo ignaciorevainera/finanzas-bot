@@ -221,13 +221,27 @@ def _resolve_missing_field_answer(field: str, value: str) -> str | None:
             if field == "type"
             else PAYMENT_METHOD_OPTIONS
         )
-        normalized = normalize_transaction({field: value}).get(field)
-        return normalized if normalized in canonical else None
+        return _match_canonical_vocab(value, field, canonical)
     if field == "category":
+        base = _match_diacritic_insensitive(value, CATEGORY_OPTIONS)
+        if base is not None:
+            return base
         normalized = normalize_transaction({field: value}).get(field)
         if isinstance(normalized, str) and normalized.strip():
             return normalized
         return None
+    return None
+
+
+def _match_diacritic_insensitive(
+    value: str, canonical_values: tuple[str, ...]
+) -> str | None:
+    stripped = _strip_diacritics(value.strip()).lower()
+    if not stripped:
+        return None
+    for canonical in canonical_values:
+        if _strip_diacritics(canonical).lower() == stripped:
+            return canonical
     return None
 
 

@@ -858,6 +858,16 @@ def test_resolver_accepts_custom_category_text():
     assert _resolve_missing_field_answer("category", "Trabajo") == "Trabajo"
 
 
+def test_resolver_matches_canonical_values_ignoring_diacritics():
+    from app.handlers import _resolve_missing_field_answer
+    assert _resolve_missing_field_answer("payment_method", "tarjeta de debito") == "Tarjeta de Débito"
+    assert _resolve_missing_field_answer("payment_method", "tarjeta de credito") == "Tarjeta de Crédito"
+    assert _resolve_missing_field_answer("type", "gasto") == "Gasto"
+    assert _resolve_missing_field_answer("category", "comida") == "Comida"
+    assert _resolve_missing_field_answer("category", "educacion") == "Educación"
+    assert _resolve_missing_field_answer("payment_method", "inventado") is None
+
+
 def test_missing_field_keyboard_returns_none_for_free_text_fields():
     from app.handlers import _get_missing_field_keyboard
     assert _get_missing_field_keyboard("amount") is None
