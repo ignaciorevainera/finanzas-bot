@@ -63,9 +63,9 @@ Extracted data is stored in a serverless PostgreSQL 18 database on Neon. The app
 1. **Extraction** — Gemini (`parse_transaction_from_text` / `parse_transaction_from_audio`) extracts a raw transaction from the user's message.
 2. **Normalization** (`app/transaction_schema.py`) — maps values to the canonical Spanish vocabulary, capitalizes descriptions, tags, and custom categories.
 3. **Defaults** (`apply_transaction_defaults`) — fills unspecified defaults: `currency=ARS`, `transaction_date=now`, `status=Completado`, `total_amount=amount`. Explicit values are never overridden.
-4. **Required fields** — missing fields from `type`, `amount`, `category`, `description`, `payment_method` are asked **one at a time** until all are present.
+4. **Required fields** — missing fields from `type`, `amount`, `category`, `description`, `payment_method` are asked **one at a time** until all are present. Closed-choice fields (`type`, `category`, `payment_method`) are presented via **inline keyboards** (teclado): `type` shows `Gasto` / `Ingreso`, `category` shows the 16 base categories plus `Otra categoría` (which opens a text input for a custom category), and `payment_method` shows its five options. Fields already detected by the AI skip their question entirely. Text equivalents remain valid when a keyboard is shown (e.g. "gasto", "comida", "efectivo"); `amount` and `description` are always asked as plain text.
 5. **Shared distribution** — if the transaction is shared (`amount != total_amount`, participants present, or a split detected), the bot asks for the **exact per-person distribution**; amounts must sum to `total_amount`.
-6. **Confirmation** — full transaction summary with inline keyboard `Aceptar` / `Agregar más` / `Cancelar`.
+6. **Confirmation** — full transaction summary with inline keyboard `Aceptar` / `Agregar más` / `Cancelar`. Dates display as `DD/MM/YYYY` without time unless the user explicitly declared a time.
 7. **Agregar más loop** — the user may send extra details (place, tags, cuotas, etc.). Explicit values **replace** the existing context, missing/ambiguous values **preserve** it, `notes` are appended, `tags` are unioned. The loop repeats until `Aceptar` (persist) or `Cancelar` (discard).
 
 ## Finance Reports

@@ -3,6 +3,13 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+def test_readme_documents_missing_field_keyboards():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "teclado" in readme.lower()
+    assert "Otra categoría" in readme
+    assert "Agregar más" in readme
+
+
 def test_registration_flow_documentation_describes_defaults_and_required_fields():
     readme = Path("README.md").read_text(encoding="utf-8")
     assert "currency" in readme

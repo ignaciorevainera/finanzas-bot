@@ -1308,6 +1308,77 @@ async def test_text_equivalent_advances_missing_field():
     assert handlers.pending_transactions[123]["data"]["payment_method"] == "Tarjeta de Débito"
 
 
+@pytest.mark.asyncio
+@patch("app.handlers.parse_transaction_from_text")
+async def test_text_handler_complete_data_bypasses_missing_field_keyboards(mock_parse):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    data = {
+        "type": "Gasto", "amount": 500, "total_amount": 500, "currency": "ARS",
+        "category": "Comida", "description": "Cena", "payment_method": "Efectivo",
+        "transaction_date": "2026-08-12",
+    }
+    mock_parse.return_value = data
+    update = make_update(text="gaste 500 en comida", chat_id=123)
+    context = MagicMock()
+
+    await handlers.message_handler(update, context)
+
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+    reply = update.message.reply_text
+    reply.assert_awaited_once()
+    markup = reply.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    callbacks = [
+        b["callback_data"]
+        for row in markup.to_dict()["inline_keyboard"]
+        for b in row
+    ]
+    assert "confirm" in callbacks
+    assert not any(cb.startswith("missing_") for cb in callbacks)
+
+
+@pytest.mark.asyncio
+@patch("app.handlers.parse_transaction_from_audio")
+async def test_voice_handler_complete_data_bypasses_missing_field_keyboards(mock_parse):
+    from app import handlers
+    handlers.pending_transactions.clear()
+    data = {
+        "type": "Gasto", "amount": 500, "total_amount": 500, "currency": "ARS",
+        "category": "Comida", "description": "Cena", "payment_method": "Efectivo",
+        "transaction_date": "2026-08-12",
+    }
+    mock_parse.return_value = data
+    file = MagicMock()
+    file.download_as_bytearray = AsyncMock(return_value=b"audio")
+    update = MagicMock()
+    update.effective_chat.id = 123
+    update.message = MagicMock()
+    update.message.chat.send_action = AsyncMock()
+    update.message.reply_text = AsyncMock()
+    update.message.voice = MagicMock()
+    update.message.voice.get_file = AsyncMock(return_value=file)
+    update.message.voice.mime_type = "audio/ogg"
+    context = MagicMock()
+
+    await handlers.voice_handler(update, context)
+
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+    reply = update.message.reply_text
+    reply.assert_awaited_once()
+    markup = reply.await_args.kwargs.get("reply_markup")
+    assert markup is not None
+    callbacks = [
+        b["callback_data"]
+        for row in markup.to_dict()["inline_keyboard"]
+        for b in row
+    ]
+    assert "confirm" in callbacks
+    assert not any(cb.startswith("missing_") for cb in callbacks)
+
+
 def test_confirm_date_omits_time_when_not_declared():
     from app.handlers import _build_confirm_text
     text = _build_confirm_text({"type": "Gasto", "amount": 500,
