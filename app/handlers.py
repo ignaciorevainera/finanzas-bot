@@ -605,22 +605,47 @@ async def handle_parsed_data(update: Update, context: ContextTypes.DEFAULT_TYPE,
     await _advance_after_required_fields(update, chat_id, data)
 
 
-async def _advance_after_required_fields(update: Update, chat_id: int, data: dict):
+async def _send_flow_message(
+    update: Update,
+    text: str,
+    *,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    via_query: bool = False,
+) -> None:
+    if via_query:
+        await update.callback_query.edit_message_text(text=text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+
+
+async def _advance_after_required_fields(
+    update: Update, chat_id: int, data: dict, *, via_query: bool = False
+):
     if _needs_split_question(data):
         pending_transactions[chat_id] = {"action": "pick_split", "data": data}
-        await update.message.reply_text(SPLIT_PROMPT)
+        await _send_flow_message(update, SPLIT_PROMPT, via_query=via_query)
         return
 
     if data.get("transaction_date") is None:
         pending_transactions[chat_id] = {"action": "pick_date", "data": data}
-        await update.message.reply_text(
+        await _send_flow_message(
+            update,
             "¿De qué fecha es la transacción?",
             reply_markup=_get_date_keyboard(),
+            via_query=via_query,
         )
         return
 
     pending_transactions[chat_id] = {"action": "confirm", "data": data}
-    await _send_confirm_message(update, data)
+    if via_query:
+        await _send_flow_message(
+            update,
+            _build_confirm_text(data),
+            reply_markup=_get_confirm_keyboard(),
+            via_query=True,
+        )
+    else:
+        await _send_confirm_message(update, data)
 
 
 async def _send_missing_field_message(update: Update, state: dict) -> None:
@@ -639,21 +664,16 @@ async def _advance_missing_field(
     if state["missing_index"] < len(state["missing_fields"]):
         state["field"] = state["missing_fields"][state["missing_index"]]
         pending_transactions[chat_id] = state
-        text = _get_missing_field_prompt(state["field"])
-        keyboard = _get_missing_field_keyboard(state["field"])
-        if via_query:
-            await update.callback_query.edit_message_text(text=text, reply_markup=keyboard)
-        else:
-            await update.message.reply_text(text, reply_markup=keyboard)
-        return
-    pending_transactions[chat_id] = {"action": "confirm", "data": state["data"]}
-    if via_query:
-        await update.callback_query.edit_message_text(
-            text=_build_confirm_text(state["data"]),
-            reply_markup=_get_confirm_keyboard(),
+        await _send_flow_message(
+            update,
+            _get_missing_field_prompt(state["field"]),
+            reply_markup=_get_missing_field_keyboard(state["field"]),
+            via_query=via_query,
         )
-    else:
-        await _send_confirm_message(update, state["data"])
+        return
+    await _advance_after_required_fields(
+        update, chat_id, state["data"], via_query=via_query
+    )
 
 
 def _parse_missing_field_answer(field: str, text: str) -> str | float | None:

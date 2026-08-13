@@ -1142,3 +1142,104 @@ async def test_text_invalid_answer_reprompts_with_keyboard():
     assert state["missing_index"] == 0
     assert "type" not in state["data"]
     assert update.message.reply_text.call_args[1]["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
+async def test_callback_last_field_with_split_enters_pick_split():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "payment_method",
+        "missing_fields": ["payment_method"],
+        "missing_index": 0,
+        "data": {
+            "type": "Gasto", "amount": 30000, "total_amount": 120000,
+            "currency": "ARS", "category": "Comida", "description": "Cena",
+            "payment_method": None, "participants": ["Viole"],
+            "transaction_date": "2026-08-12",
+        },
+    }
+    update = make_update(callback_data="missing_payment_cash", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_split"
+    assert state["data"]["payment_method"] == "Efectivo"
+    update.callback_query.edit_message_text.assert_awaited_once()
+    assert (
+        "distribución"
+        in update.callback_query.edit_message_text.await_args.kwargs["text"].lower()
+    )
+
+
+@pytest.mark.asyncio
+async def test_callback_last_field_no_split_date_present_confirms_via_edit():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "payment_method",
+        "missing_fields": ["payment_method"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "category": "Comida",
+                 "description": "Cena", "transaction_date": "2026-08-12"},
+    }
+    update = make_update(callback_data="missing_payment_cash", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "confirm"
+    assert state["data"]["payment_method"] == "Efectivo"
+    update.callback_query.edit_message_text.assert_awaited_once()
+    assert (
+        "Transacción detectada:"
+        in update.callback_query.edit_message_text.await_args.kwargs["text"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_callback_last_field_date_null_enters_pick_date():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "payment_method",
+        "missing_fields": ["payment_method"],
+        "missing_index": 0,
+        "data": {"type": "Gasto", "amount": 500, "category": "Comida",
+                 "description": "Cena", "transaction_date": None},
+    }
+    update = make_update(callback_data="missing_payment_cash", chat_id=123)
+    context = MagicMock()
+    await handlers.callback_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_date"
+    edit_kwargs = update.callback_query.edit_message_text.await_args.kwargs
+    assert "¿De qué fecha es la transacción?" in edit_kwargs["text"]
+    assert edit_kwargs["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
+async def test_text_completed_missing_fields_split_still_triggers_via_reply():
+    from app import handlers
+    handlers.pending_transactions.clear()
+    handlers.pending_transactions[123] = {
+        "action": "pick_missing",
+        "field": "payment_method",
+        "missing_fields": ["payment_method"],
+        "missing_index": 0,
+        "data": {
+            "type": "Gasto", "amount": 30000, "total_amount": 120000,
+            "currency": "ARS", "category": "Comida", "description": "Cena",
+            "payment_method": None, "participants": ["Viole"],
+            "transaction_date": "2026-08-12",
+        },
+    }
+    update = make_update(text="efectivo", chat_id=123)
+    context = MagicMock()
+    await handlers.message_handler(update, context)
+    state = handlers.pending_transactions[123]
+    assert state["action"] == "pick_split"
+    assert state["data"]["payment_method"] == "Efectivo"
+    assert "distribución" in update.message.reply_text.call_args[0][0].lower()
